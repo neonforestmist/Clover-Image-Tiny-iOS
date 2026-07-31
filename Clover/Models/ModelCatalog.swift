@@ -40,6 +40,9 @@ struct ModelCatalog: Codable, Equatable, Sendable {
         let repository: String?
         let revision: String
         let downloadSize: Int64
+        /// The full fused U-Net size for a style, before it shares Clover's base weights.
+        /// This is display metadata, not an additional download requirement.
+        let styleModelSize: Int64?
         let files: [ResourceFile]
 
         enum CodingKeys: String, CodingKey {
@@ -53,6 +56,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
             case repository
             case revision
             case downloadSize = "download_size"
+            case styleModelSize = "style_model_size"
             case files
         }
 
@@ -108,6 +112,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 repository: nil,
                 revision: "",
                 downloadSize: 0,
+                styleModelSize: nil,
                 files: []
             )
         ]

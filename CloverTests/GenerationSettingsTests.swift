@@ -197,6 +197,7 @@ final class GenerationSettingsTests: XCTestCase {
                 "repository": "neonforestmist/Clover-Image-Tiny-CoreML",
                 "revision": "sharedcommit",
                 "download_size": 0,
+                "style_model_size": 647757010,
                 "files": []
               }]
             }
@@ -211,6 +212,7 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertEqual(catalog.schemaVersion, 2)
         XCTAssertEqual(watercolor.coreMLFunctionName, "watercolor_anime")
         XCTAssertEqual(watercolor.downloadSize, 0)
+        XCTAssertEqual(watercolor.styleModelSize, 647_757_010)
     }
 
     func testLocalMultifunctionModelFunctionsLoad() async throws {

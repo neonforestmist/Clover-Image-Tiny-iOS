@@ -46,7 +46,7 @@ struct ModelPickerView: View {
                     Text("On-device models")
                 } footer: {
                     Text(
-                        "Clover is a required \(formattedCloverSize) download. Once Clover is installed, the style options become available without separate downloads. Files are verified with SHA-256 and visible in On My iPhone › Clover › Models."
+                        "Clover is a required \(formattedCloverSize) download. Each style is a 648 MB model that reuses Clover’s stored base weights, so choosing a style does not add another 648 MB download. Files are verified with SHA-256 and visible in On My iPhone › Clover › Models."
                     )
                 }
 
@@ -154,6 +154,10 @@ private struct ModelVariantRow: View {
                         Text("Clover download: \(formattedDownloadSize)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    } else if let formattedStyleModelSize {
+                        Text("\(formattedStyleModelSize) style model")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     if let trigger = variant.trigger {
@@ -225,12 +229,12 @@ private struct ModelVariantRow: View {
                     Text("Requires Clover")
                         .font(.caption)
                         .fontWeight(.semibold)
-                    Text("\(formattedDownloadSize) prerequisite")
+                    Text(styleModelSizeLabel)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityLabel(
-                    "\(variant.name) requires the \(formattedDownloadSize) Clover download"
+                    "\(variant.name) is a \(styleModelSizeLabel) and requires Clover"
                 )
             } else {
                 Button {
@@ -252,6 +256,16 @@ private struct ModelVariantRow: View {
 
     private var formattedDownloadSize: String {
         "≈\(downloadSize.formatted(.byteCount(style: .memory)))"
+    }
+
+    private var formattedStyleModelSize: String? {
+        guard let styleModelSize = variant.styleModelSize else { return nil }
+        let megabytes = Int((Double(styleModelSize) / 1_000_000).rounded())
+        return "\(megabytes) MB"
+    }
+
+    private var styleModelSizeLabel: String {
+        "\(formattedStyleModelSize ?? formattedDownloadSize) style model"
     }
 }
 
