@@ -35,9 +35,6 @@ struct AppShell: View {
             .tag(Tab.library)
         }
         .tint(.cloverGreen)
-        .onChange(of: selectedTab) {
-            HapticManager.selection()
-        }
     }
 }
 
