@@ -1,0 +1,17 @@
+.DS_Store
+
+# Xcode
+DerivedData/
+.derivedData*/
+build/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.xcscmblueprint
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Local configuration
+*.xcconfig.local
