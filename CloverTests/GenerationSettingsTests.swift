@@ -2,6 +2,20 @@ import XCTest
 @testable import Clover
 
 final class GenerationSettingsTests: XCTestCase {
+    func testModelStorageIsVisibleInDocuments() {
+        let documentsURL = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0]
+
+        XCTAssertEqual(
+            ModelStorage.rootURL.standardizedFileURL,
+            documentsURL
+                .appending(path: "Models", directoryHint: .isDirectory)
+                .standardizedFileURL
+        )
+    }
+
     func testSnapshotKeepsTheGenerationSeed() {
         var settings = GenerationSettings()
         settings.seed = 41

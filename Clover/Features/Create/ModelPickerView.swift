@@ -41,7 +41,7 @@ struct ModelPickerView: View {
                     Text("On-device models")
                 } footer: {
                     Text(
-                        "Downloaded from Hugging Face and verified with SHA-256. Shared components are stored once."
+                        "Downloaded from Hugging Face and verified with SHA-256. Find the files in On My iPhone › Clover › Models."
                     )
                 }
 

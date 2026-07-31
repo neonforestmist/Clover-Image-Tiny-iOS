@@ -3,14 +3,87 @@ import Foundation
 enum ModelStorage {
     private static let installKeyPrefix = "clover-model-install-"
 
-    static var rootURL: URL {
-        FileManager.default.urls(
+    static let rootURL: URL = {
+        let fileManager = FileManager.default
+        let visibleURL = fileManager.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0]
+        .appending(path: "Models", directoryHint: .isDirectory)
+        let legacyURL = fileManager.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
         )[0]
         .appending(path: "Clover", directoryHint: .isDirectory)
         .appending(path: "Models", directoryHint: .isDirectory)
-    }
+
+        do {
+            let legacyExists = fileManager.fileExists(
+                atPath: legacyURL.path
+            )
+            let legacyIsCompatibilityLink = (
+                try? fileManager.destinationOfSymbolicLink(
+                    atPath: legacyURL.path
+                )
+            ) != nil
+            var visibleExists = fileManager.fileExists(
+                atPath: visibleURL.path
+            )
+
+            if legacyExists, !legacyIsCompatibilityLink, visibleExists {
+                let visibleContents = try fileManager.contentsOfDirectory(
+                    at: visibleURL,
+                    includingPropertiesForKeys: nil
+                )
+                if visibleContents.isEmpty {
+                    try fileManager.removeItem(at: visibleURL)
+                    visibleExists = false
+                }
+            }
+
+            if legacyExists, !legacyIsCompatibilityLink, !visibleExists {
+                try fileManager.createDirectory(
+                    at: visibleURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try fileManager.moveItem(at: legacyURL, to: visibleURL)
+            } else if !visibleExists {
+                try fileManager.createDirectory(
+                    at: visibleURL,
+                    withIntermediateDirectories: true
+                )
+            }
+
+            // Existing installation records and assembled model symlinks use
+            // the legacy absolute path. This compatibility link keeps
+            // migrated downloads usable without downloading them again.
+            if !fileManager.fileExists(atPath: legacyURL.path),
+               !legacyIsCompatibilityLink {
+                try fileManager.createDirectory(
+                    at: legacyURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try fileManager.createSymbolicLink(
+                    at: legacyURL,
+                    withDestinationURL: visibleURL
+                )
+            }
+
+            var visibleResourceURL = visibleURL
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try visibleResourceURL.setResourceValues(values)
+        } catch {
+            // New downloads still target Documents if migration fails. The
+            // downloader will surface any later file-system error.
+            try? fileManager.createDirectory(
+                at: visibleURL,
+                withIntermediateDirectories: true
+            )
+        }
+
+        return visibleURL
+    }()
 
     static var cachedCatalogURL: URL {
         rootURL

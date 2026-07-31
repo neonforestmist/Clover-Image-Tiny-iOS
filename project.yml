@@ -32,7 +32,9 @@ targets:
       properties:
         CFBundleDisplayName: Clover
         ITSAppUsesNonExemptEncryption: false
+        LSSupportsOpeningDocumentsInPlace: true
         NSPhotoLibraryAddUsageDescription: Clover saves images you create to your photo library.
+        UIFileSharingEnabled: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen:

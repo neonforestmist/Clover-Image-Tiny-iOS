@@ -18,6 +18,7 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 - Neural Engine, automatic, and GPU compute modes
 - Local artwork library and Photos export
 - Downloadable base and style models with progress, cancellation, and removal
+- Visible downloads in **On My iPhone → Clover → Models**
 - Immutable model revisions with byte-count and SHA-256 verification
 
 Output resolution is fixed at 512 × 512 by the converted Core ML models.
@@ -44,6 +45,9 @@ The app reads its versioned catalog from
 [`neonforestmist/Clover-Image-Tiny-CoreML`](https://huggingface.co/neonforestmist/Clover-Image-Tiny-CoreML).
 Shared resources are stored once, while each selected variant supplies its
 chunked U-Net. Installed files are checked against the catalog before use.
+Downloaded files are visible in the Files app under
+**On My iPhone → Clover → Models**. Existing downloads from earlier builds are
+migrated into that folder when possible.
 
 Available style variants are published separately:
 
