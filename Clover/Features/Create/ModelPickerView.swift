@@ -14,10 +14,8 @@ struct ModelPickerView: View {
                             variant: variant,
                             state: manager.state(for: variant.id),
                             isSelected: settings.modelID == variant.id,
-                            downloadSize: manager.requiredDownloadSize(
-                                for: variant
-                            ),
-                            isBundledStyle: manager.catalog.schemaVersion >= 2
+                            downloadSize: modelDownloadSize(for: variant),
+                            requiresClover: manager.catalog.schemaVersion >= 2
                                 && variant.id != "base",
                             canDownload: !manager.catalog.common.files.isEmpty
                                 && (
@@ -48,7 +46,7 @@ struct ModelPickerView: View {
                     Text("On-device models")
                 } footer: {
                     Text(
-                        "One shared Clover download includes the base model and all three lightweight style adapters. Files are verified with SHA-256 and visible in On My iPhone › Clover › Models."
+                        "Clover is a required \(formattedCloverSize) download. Once Clover is installed, the style options become available without separate downloads. Files are verified with SHA-256 and visible in On My iPhone › Clover › Models."
                     )
                 }
 
@@ -105,6 +103,21 @@ struct ModelPickerView: View {
         }
         .presentationDetents([.medium, .large])
     }
+
+    private func modelDownloadSize(
+        for variant: ModelCatalog.Variant
+    ) -> Int64 {
+        if manager.catalog.schemaVersion >= 2 {
+            return manager.catalog.common.downloadSize
+        }
+        return manager.requiredDownloadSize(for: variant)
+    }
+
+    private var formattedCloverSize: String {
+        let bytes = manager.catalog.common.downloadSize
+        guard bytes > 0 else { return "≈1.5 GB" }
+        return "≈\(bytes.formatted(.byteCount(style: .memory)))"
+    }
 }
 
 private struct ModelVariantRow: View {
@@ -112,7 +125,7 @@ private struct ModelVariantRow: View {
     let state: ModelManager.InstallState
     let isSelected: Bool
     let downloadSize: Int64
-    let isBundledStyle: Bool
+    let requiresClover: Bool
     let canDownload: Bool
     let select: () -> Void
     let download: () -> Void
@@ -136,6 +149,12 @@ private struct ModelVariantRow: View {
                     Text(variant.summary)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+
+                    if variant.id == "base" {
+                        Text("Clover download: \(formattedDownloadSize)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
                     if let trigger = variant.trigger {
                         Text("Prompt trigger: \(trigger)")
@@ -166,7 +185,7 @@ private struct ModelVariantRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("model-\(variant.id)")
         .contextMenu {
-            if state == .installed, !isBundledStyle {
+            if state == .installed, !requiresClover {
                 Button("Remove Download", role: .destructive) {
                     remove()
                 }
@@ -201,16 +220,18 @@ private struct ModelVariantRow: View {
             }
             .buttonStyle(.borderless)
         case .notInstalled, .failed:
-            if isBundledStyle {
+            if requiresClover {
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("Included")
+                    Text("Requires Clover")
                         .font(.caption)
                         .fontWeight(.semibold)
-                    Text("with Clover")
+                    Text("\(formattedDownloadSize) prerequisite")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                .accessibilityLabel("\(variant.name) is included with Clover")
+                .accessibilityLabel(
+                    "\(variant.name) requires the \(formattedDownloadSize) Clover download"
+                )
             } else {
                 Button {
                     download()
@@ -218,7 +239,7 @@ private struct ModelVariantRow: View {
                     VStack(alignment: .trailing, spacing: 2) {
                         Image(systemName: "arrow.down.circle")
                             .font(.title3)
-                        Text(downloadSize, format: .byteCount(style: .file))
+                        Text(formattedDownloadSize)
                             .font(.caption2)
                     }
                 }
@@ -227,6 +248,10 @@ private struct ModelVariantRow: View {
                 .accessibilityLabel("Download \(variant.name)")
             }
         }
+    }
+
+    private var formattedDownloadSize: String {
+        "≈\(downloadSize.formatted(.byteCount(style: .memory)))"
     }
 }
 

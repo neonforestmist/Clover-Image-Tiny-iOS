@@ -38,6 +38,7 @@ struct CreateView: View {
                 promptSection
             }
             .padding()
+            .padding(.bottom, 12)
         }
         .scrollDismissesKeyboard(.interactively)
         .environment(library)
@@ -54,8 +55,11 @@ struct CreateView: View {
                 .disabled(store.phase.isWorking)
             }
         }
-        .safeAreaInset(edge: .bottom) {
-            generationBar
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            generationAction
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
         }
         .sheet(item: $store.presentedSheet) { destination in
             switch destination {
@@ -179,7 +183,7 @@ struct CreateView: View {
     }
 
     @ViewBuilder
-    private var generationBar: some View {
+    private var generationAction: some View {
         VStack(spacing: 8) {
             if case let .generating(progress) = store.phase {
                 ProgressView(value: progress)
@@ -195,6 +199,7 @@ struct CreateView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
             } else {
                 if modelManager.isInstalled(store.settings.modelID) {
                     Button {
@@ -206,6 +211,7 @@ struct CreateView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                     .disabled(store.settings.trimmedPrompt.isEmpty)
                     .accessibilityIdentifier("generate-button")
                 } else {
@@ -214,21 +220,19 @@ struct CreateView: View {
                         store.presentedSheet = .models
                     } label: {
                         Label(
-                            "Download \(selectedVariant?.name ?? "Model")",
+                            downloadActionTitle,
                             systemImage: "arrow.down.circle"
                         )
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                     .accessibilityIdentifier("download-model-button")
                 }
             }
         }
-        .padding(.horizontal)
-        .padding(.top, 10)
-        .padding(.bottom, 4)
-        .background(.bar)
+        .padding(.top, 4)
     }
 
     private var statusTitle: String {
@@ -257,10 +261,25 @@ struct CreateView: View {
         case let .downloading(progress):
             "Downloading \(progress.formatted(.percent))"
         case .notInstalled:
-            "Tap to download from Hugging Face"
+            if requiresCloverDownload {
+                "Requires Clover model download"
+            } else {
+                "Tap to download from Hugging Face"
+            }
         case .failed:
             "Download needs attention"
         }
+    }
+
+    private var requiresCloverDownload: Bool {
+        modelManager.catalog.schemaVersion >= 2
+            && store.settings.modelID != "base"
+    }
+
+    private var downloadActionTitle: String {
+        requiresCloverDownload
+            ? "Download Clover First"
+            : "Download \(selectedVariant?.name ?? "Model")"
     }
 }
 
