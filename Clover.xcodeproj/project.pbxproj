@@ -23,6 +23,7 @@
 		8B8F9037EEC41B9B064FBF8C /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E40853620E0E11190980BA /* LibraryView.swift */; };
 		B3BFCAD6704C972354464F16 /* GenerationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B48211C709F0EE0ED78A4D /* GenerationStore.swift */; };
 		BA6AE9816DC12CE630F1F81B /* Artwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03F535EF78EE89AD6605E1AE /* Artwork.swift */; };
+		C3904C75703A700C253BD1D5 /* CloverPipelineFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA88D1BE25E1B041C2F18A6E /* CloverPipelineFactory.swift */; };
 		C3C555BFA252CCF41BB5B57C /* ModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19893481D071D68186277EC /* ModelManager.swift */; };
 		C513CEF0C487FB2E2F82160C /* CloverUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C0B26887CC21B772F4D3999 /* CloverUITests.swift */; };
 		CF48D02C9EF0E7DC9A49C1AE /* GenerationSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D28B9CAF0BA7E3DF492124 /* GenerationSettingsTests.swift */; };
@@ -65,6 +66,7 @@
 		731A911A9436021A67F9CFD4 /* CloverTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CloverTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		78BCA2819170F6D3F433D255 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		79B9E8E0368C53195C2508F9 /* ModelDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloader.swift; sourceTree = "<group>"; };
+		86FF1342AB5A49C2EB40B801 /* ml-stable-diffusion */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "ml-stable-diffusion"; path = "Packages/ml-stable-diffusion"; sourceTree = SOURCE_ROOT; };
 		92A45F040CE02B2AE8127357 /* GenerationSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationSettingsSheet.swift; sourceTree = "<group>"; };
 		A0E06D686B3851637E5FB89F /* CloverUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CloverUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1EF40AD5AAA0FDC6BE38B12 /* ModelPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPickerView.swift; sourceTree = "<group>"; };
@@ -79,6 +81,7 @@
 		D087018EBF7440F68BEF0606 /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
 		D2EB1BB36973765C8BA07061 /* GenerationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationService.swift; sourceTree = "<group>"; };
 		E9696B3BC224830E52324737 /* ArtworkImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkImage.swift; sourceTree = "<group>"; };
+		EA88D1BE25E1B041C2F18A6E /* CloverPipelineFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloverPipelineFactory.swift; sourceTree = "<group>"; };
 		EF77F5F72FA18C178860EB7E /* CreateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -166,6 +169,7 @@
 			isa = PBXGroup;
 			children = (
 				B84A2AEB282D3B4FB1804E43 /* ArtworkLibrary.swift */,
+				EA88D1BE25E1B041C2F18A6E /* CloverPipelineFactory.swift */,
 				D2EB1BB36973765C8BA07061 /* GenerationService.swift */,
 				C7F878F21174336ADE66CC98 /* HapticManager.swift */,
 				79B9E8E0368C53195C2508F9 /* ModelDownloader.swift */,
@@ -192,6 +196,7 @@
 				45037544E7801E62CB5CD376 /* Clover */,
 				4918D799A475E790311DD765 /* CloverTests */,
 				0E437351A28E172736341F98 /* CloverUITests */,
+				F62ACE2AE30838ECF46AD86F /* Packages */,
 				F86A2BEC4A781FF08AEB3B85 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -204,6 +209,14 @@
 				28E40853620E0E11190980BA /* LibraryView.swift */,
 			);
 			path = Library;
+			sourceTree = "<group>";
+		};
+		F62ACE2AE30838ECF46AD86F /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				86FF1342AB5A49C2EB40B801 /* ml-stable-diffusion */,
+			);
+			path = Packages;
 			sourceTree = "<group>";
 		};
 		F86A2BEC4A781FF08AEB3B85 /* Products */ = {
@@ -307,7 +320,7 @@
 			mainGroup = BBC291CF3795F428988A4717;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				B1E537A149D0D13C77DDE73A /* XCRemoteSwiftPackageReference "ml-stable-diffusion" */,
+				F540951DC3738FAD1D462B68 /* XCLocalSwiftPackageReference "Packages/ml-stable-diffusion" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F86A2BEC4A781FF08AEB3B85 /* Products */;
@@ -343,6 +356,7 @@
 				8ADEFA077549890310410A05 /* ArtworkImage.swift in Sources */,
 				DB141BD8436E4A12B6D8A0B6 /* ArtworkLibrary.swift in Sources */,
 				715E6DECF51AAC8064B2F9BC /* CloverApp.swift in Sources */,
+				C3904C75703A700C253BD1D5 /* CloverPipelineFactory.swift in Sources */,
 				5A509DFCAE16DD6051AB850C /* Color+Clover.swift in Sources */,
 				77D62DC6AAB87E60F82A8E04 /* CreateView.swift in Sources */,
 				F015236141F5A6691098980A /* GenerationService.swift in Sources */,
@@ -467,7 +481,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -526,7 +540,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -669,21 +683,16 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		B1E537A149D0D13C77DDE73A /* XCRemoteSwiftPackageReference "ml-stable-diffusion" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/apple/ml-stable-diffusion.git";
-			requirement = {
-				kind = revision;
-				revision = e12202c1f6405b83918b58a5d097cd61e3e1f702;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		F540951DC3738FAD1D462B68 /* XCLocalSwiftPackageReference "Packages/ml-stable-diffusion" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "Packages/ml-stable-diffusion";
 		};
-/* End XCRemoteSwiftPackageReference section */
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		0EF07D858622E78717D2AB43 /* StableDiffusion */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B1E537A149D0D13C77DDE73A /* XCRemoteSwiftPackageReference "ml-stable-diffusion" */;
 			productName = StableDiffusion;
 		};
 /* End XCSwiftPackageProductDependency section */

@@ -8,12 +8,28 @@ struct GenerationSettingsSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Stepper(
-                        "\(settings.stepCount) steps",
-                        value: $settings.stepCount,
-                        in: 4...100
-                    )
-                    .accessibilityIdentifier("steps-stepper")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Stepper(
+                            "\(settings.stepCount) steps",
+                            value: $settings.stepCount,
+                            in: 4...100
+                        )
+                        .accessibilityIdentifier("steps-stepper")
+
+                        Slider(
+                            value: Binding(
+                                get: { Double(settings.stepCount) },
+                                set: {
+                                    settings.stepCount = Int($0.rounded())
+                                }
+                            ),
+                            in: 4...100,
+                            step: 1
+                        )
+                        .accessibilityLabel("Inference steps")
+                        .accessibilityValue("\(settings.stepCount)")
+                        .accessibilityIdentifier("steps-slider")
+                    }
 
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {

@@ -110,11 +110,10 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
             let configuration = MLModelConfiguration()
             configuration.computeUnits = settings.computeTarget.coreMLComputeUnits
 
-            let newPipeline = try StableDiffusionPipeline(
-                resourcesAt: resourcesURL,
-                controlNet: [],
-                configuration: configuration,
-                reduceMemory: true
+            let newPipeline = try CloverPipelineFactory.make(
+                resourcesURL: resourcesURL,
+                modelID: settings.modelID,
+                configuration: configuration
             )
             try newPipeline.loadResources()
             pipeline = newPipeline

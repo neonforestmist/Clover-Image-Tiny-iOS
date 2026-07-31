@@ -23,6 +23,7 @@ final class CloverUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["Parameters"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.steppers["steps-stepper"].exists)
+        XCTAssertTrue(app.sliders["steps-slider"].exists)
         XCTAssertTrue(app.sliders["guidance-slider"].exists)
         XCTAssertTrue(app.steppers["image-count-stepper"].exists)
         XCTAssertTrue(app.textFields["seed-field"].exists)

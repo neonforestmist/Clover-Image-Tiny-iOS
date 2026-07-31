@@ -26,13 +26,13 @@
 	<true/>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Clover saves images you create to your photo library.</string>
-	<key>UIFileSharingEnabled</key>
-	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

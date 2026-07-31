@@ -115,9 +115,13 @@ enum ModelStorage {
         if let stored = UserDefaults.standard.string(
             forKey: installKeyPrefix + id
         ) {
-            let url = URL(filePath: stored, directoryHint: .isDirectory)
-            if isUsableResourcesDirectory(url) {
-                return url
+            for url in installationCandidates(for: stored) {
+                if isUsableResourcesDirectory(url) {
+                    if stored.hasPrefix("/") {
+                        recordInstallation(id: id, resourcesURL: url)
+                    }
+                    return url
+                }
             }
         }
 
@@ -130,8 +134,20 @@ enum ModelStorage {
     }
 
     static func recordInstallation(id: String, resourcesURL: URL) {
+        let rootComponents = rootURL.standardizedFileURL.pathComponents
+        let resourceComponents = resourcesURL
+            .standardizedFileURL
+            .pathComponents
+        let storedPath: String
+        if resourceComponents.starts(with: rootComponents) {
+            storedPath = resourceComponents
+                .dropFirst(rootComponents.count)
+                .joined(separator: "/")
+        } else {
+            storedPath = resourcesURL.path
+        }
         UserDefaults.standard.set(
-            resourcesURL.path,
+            storedPath,
             forKey: installKeyPrefix + id
         )
     }
@@ -155,5 +171,44 @@ enum ModelStorage {
                 atPath: url.appending(path: $0).path
             )
         }
+    }
+
+    static func isMultifunctionResourcesDirectory(_ url: URL) -> Bool {
+        isUsableResourcesDirectory(url)
+            && FileManager.default.fileExists(
+                atPath: url.appending(path: "functions.json").path
+            )
+    }
+
+    private static func installationCandidates(
+        for storedPath: String
+    ) -> [URL] {
+        if !storedPath.hasPrefix("/") {
+            return [
+                rootURL.appending(
+                    path: storedPath,
+                    directoryHint: .isDirectory
+                )
+            ]
+        }
+
+        var candidates = [
+            URL(filePath: storedPath, directoryHint: .isDirectory)
+        ]
+        if let modelsRange = storedPath.range(
+            of: "/Models/",
+            options: .backwards
+        ) {
+            let relativePath = String(
+                storedPath[modelsRange.upperBound...]
+            )
+            candidates.append(
+                rootURL.appending(
+                    path: relativePath,
+                    directoryHint: .isDirectory
+                )
+            )
+        }
+        return candidates
     }
 }
