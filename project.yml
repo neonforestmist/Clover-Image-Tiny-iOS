@@ -3,14 +3,13 @@ name: Clover
 options:
   bundleIdPrefix: com.lukaslozada
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "18.0"
   createIntermediateGroups: true
   groupSortPosition: top
 
 packages:
   StableDiffusion:
-    url: https://github.com/apple/ml-stable-diffusion.git
-    revision: e12202c1f6405b83918b58a5d097cd61e3e1f702
+    path: Packages/ml-stable-diffusion
 
 settings:
   base:

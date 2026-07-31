@@ -36,6 +36,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
         let trigger: String?
         let sourceLoRA: String?
         let dataset: String?
+        let functionName: String?
         let repository: String?
         let revision: String
         let downloadSize: Int64
@@ -48,10 +49,16 @@ struct ModelCatalog: Codable, Equatable, Sendable {
             case trigger
             case sourceLoRA = "source_lora"
             case dataset
+            case functionName = "function_name"
             case repository
             case revision
             case downloadSize = "download_size"
             case files
+        }
+
+        var coreMLFunctionName: String {
+            functionName
+                ?? id.replacingOccurrences(of: "-", with: "_")
         }
     }
 
@@ -78,10 +85,10 @@ struct ModelCatalog: Codable, Equatable, Sendable {
     )!
 
     static let bootstrap = ModelCatalog(
-        schemaVersion: 1,
+        schemaVersion: 2,
         catalogVersion: "loading",
         repository: "neonforestmist/Clover-Image-Tiny-CoreML",
-        minimumIOS: "17.0",
+        minimumIOS: "18.0",
         resolution: [512, 512],
         common: ResourceGroup(
             repository: nil,
@@ -97,6 +104,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 trigger: nil,
                 sourceLoRA: nil,
                 dataset: nil,
+                functionName: "base",
                 repository: nil,
                 revision: "",
                 downloadSize: 0,

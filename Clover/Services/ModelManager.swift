@@ -21,6 +21,8 @@ final class ModelManager {
     @ObservationIgnored
     private var downloadTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored
+    private var sharedDownloadTask: Task<Void, Never>?
+    @ObservationIgnored
     private let previewInstalled: Bool
 
     init(previewInstalled: Bool? = nil) {
@@ -43,7 +45,7 @@ final class ModelManager {
                 throw ModelDownloadError.invalidResponse
             }
             let remote = try JSONDecoder().decode(ModelCatalog.self, from: data)
-            guard remote.schemaVersion == 1 else {
+            guard 1...2 ~= remote.schemaVersion else {
                 throw ModelDownloadError.invalidResponse
             }
             catalog = remote
@@ -72,6 +74,11 @@ final class ModelManager {
     }
 
     func download(_ variant: ModelCatalog.Variant) {
+        if catalog.schemaVersion >= 2 {
+            downloadSharedModel(selectedFrom: variant)
+            return
+        }
+
         guard downloadTasks[variant.id] == nil,
               !variant.files.isEmpty,
               !catalog.common.files.isEmpty else {
@@ -105,12 +112,26 @@ final class ModelManager {
     }
 
     func cancelDownload(_ id: String) {
+        if catalog.schemaVersion >= 2 {
+            sharedDownloadTask?.cancel()
+            sharedDownloadTask = nil
+            for variant in catalog.variants {
+                states[variant.id] = .notInstalled
+            }
+            return
+        }
+
         downloadTasks[id]?.cancel()
         downloadTasks[id] = nil
         states[id] = .notInstalled
     }
 
     func remove(_ variant: ModelCatalog.Variant) {
+        if catalog.schemaVersion >= 2 {
+            removeSharedModel()
+            return
+        }
+
         cancelDownload(variant.id)
         let root = ModelStorage.rootURL
             .appending(path: "Installed", directoryHint: .isDirectory)
@@ -128,11 +149,26 @@ final class ModelManager {
         let commonInstalled = catalog.variants.contains {
             isInstalled($0.id)
         }
+        if catalog.schemaVersion >= 2 {
+            return commonInstalled ? 0 : catalog.common.downloadSize
+        }
         return variant.downloadSize
             + (commonInstalled ? 0 : catalog.common.downloadSize)
     }
 
     private func refreshInstallStates() {
+        if catalog.schemaVersion >= 2 {
+            let sharedResources = catalog.variants.lazy.compactMap {
+                ModelStorage.resourcesURL(for: $0.id)
+            }.first(where: ModelStorage.isMultifunctionResourcesDirectory)
+            for variant in catalog.variants {
+                states[variant.id] = sharedResources == nil
+                    ? .notInstalled
+                    : .installed
+            }
+            return
+        }
+
         for variant in catalog.variants
         where downloadTasks[variant.id] == nil {
             states[variant.id] = ModelStorage.resourcesURL(for: variant.id) == nil
@@ -157,5 +193,70 @@ final class ModelManager {
             withIntermediateDirectories: true
         )
         try data.write(to: url, options: .atomic)
+    }
+
+    private func downloadSharedModel(
+        selectedFrom variant: ModelCatalog.Variant
+    ) {
+        guard sharedDownloadTask == nil,
+              !catalog.common.files.isEmpty else {
+            return
+        }
+
+        for item in catalog.variants {
+            states[item.id] = .downloading(0)
+        }
+        sharedDownloadTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let resourcesURL = try await downloader.install(
+                    variant: variant,
+                    catalog: catalog
+                ) { progress in
+                    Task { @MainActor in
+                        for item in self.catalog.variants {
+                            self.states[item.id] = .downloading(progress)
+                        }
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                for item in catalog.variants {
+                    ModelStorage.recordInstallation(
+                        id: item.id,
+                        resourcesURL: resourcesURL
+                    )
+                    states[item.id] = .installed
+                }
+            } catch is CancellationError {
+                for item in catalog.variants {
+                    states[item.id] = .notInstalled
+                }
+            } catch {
+                for item in catalog.variants {
+                    states[item.id] = .failed(error.localizedDescription)
+                }
+            }
+            sharedDownloadTask = nil
+        }
+    }
+
+    private func removeSharedModel() {
+        cancelDownload("shared")
+        let fileManager = FileManager.default
+        try? fileManager.removeItem(
+            at: ModelStorage.rootURL.appending(
+                path: "Installed",
+                directoryHint: .isDirectory
+            )
+        )
+        try? fileManager.removeItem(
+            at: ModelStorage.sharedURL(
+                revision: catalog.common.revision
+            )
+        )
+        for item in catalog.variants {
+            ModelStorage.clearInstallation(id: item.id)
+            states[item.id] = .notInstalled
+        }
     }
 }

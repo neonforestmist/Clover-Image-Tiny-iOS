@@ -1,14 +1,5 @@
 {
-  "originHash" : "4703cd72e7333f0067d3c55cda30c7c17b0423633e3ce6d6af673c769cffaa17",
   "pins" : [
-    {
-      "identity" : "ml-stable-diffusion",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/ml-stable-diffusion.git",
-      "state" : {
-        "revision" : "e12202c1f6405b83918b58a5d097cd61e3e1f702"
-      }
-    },
     {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",
@@ -28,5 +19,5 @@
       }
     }
   ],
-  "version" : 3
+  "version" : 2
 }

@@ -17,6 +17,13 @@ struct ModelPickerView: View {
                             downloadSize: manager.requiredDownloadSize(
                                 for: variant
                             ),
+                            isBundledStyle: manager.catalog.schemaVersion >= 2
+                                && variant.id != "base",
+                            canDownload: !manager.catalog.common.files.isEmpty
+                                && (
+                                    manager.catalog.schemaVersion >= 2
+                                    || !variant.files.isEmpty
+                                ),
                             select: {
                                 settings.modelID = variant.id
                                 settings.persist()
@@ -41,7 +48,7 @@ struct ModelPickerView: View {
                     Text("On-device models")
                 } footer: {
                     Text(
-                        "Downloaded from Hugging Face and verified with SHA-256. Find the files in On My iPhone › Clover › Models."
+                        "One shared Clover download includes the base model and all three lightweight style adapters. Files are verified with SHA-256 and visible in On My iPhone › Clover › Models."
                     )
                 }
 
@@ -105,6 +112,8 @@ private struct ModelVariantRow: View {
     let state: ModelManager.InstallState
     let isSelected: Bool
     let downloadSize: Int64
+    let isBundledStyle: Bool
+    let canDownload: Bool
     let select: () -> Void
     let download: () -> Void
     let cancel: () -> Void
@@ -157,7 +166,7 @@ private struct ModelVariantRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("model-\(variant.id)")
         .contextMenu {
-            if state == .installed {
+            if state == .installed, !isBundledStyle {
                 Button("Remove Download", role: .destructive) {
                     remove()
                 }
@@ -192,19 +201,31 @@ private struct ModelVariantRow: View {
             }
             .buttonStyle(.borderless)
         case .notInstalled, .failed:
-            Button {
-                download()
-            } label: {
+            if isBundledStyle {
                 VStack(alignment: .trailing, spacing: 2) {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.title3)
-                    Text(downloadSize, format: .byteCount(style: .file))
+                    Text("Included")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    Text("with Clover")
                         .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
+                .accessibilityLabel("\(variant.name) is included with Clover")
+            } else {
+                Button {
+                    download()
+                } label: {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.title3)
+                        Text(downloadSize, format: .byteCount(style: .file))
+                            .font(.caption2)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canDownload)
+                .accessibilityLabel("Download \(variant.name)")
             }
-            .buttonStyle(.borderless)
-            .disabled(variant.files.isEmpty)
-            .accessibilityLabel("Download \(variant.name)")
         }
     }
 }
