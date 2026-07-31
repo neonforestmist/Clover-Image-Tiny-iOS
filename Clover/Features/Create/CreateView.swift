@@ -215,20 +215,15 @@ struct CreateView: View {
                     .disabled(store.settings.trimmedPrompt.isEmpty)
                     .accessibilityIdentifier("generate-button")
                 } else {
-                    Button {
-                        focusedField = nil
-                        store.presentedSheet = .models
-                    } label: {
-                        Label(
-                            downloadActionTitle,
-                            systemImage: "arrow.down.circle"
-                        )
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
+                    Button {} label: {
+                        Label("Generate", systemImage: "wand.and.stars")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .accessibilityIdentifier("download-model-button")
+                    .disabled(true)
+                    .accessibilityIdentifier("generate-button")
                 }
             }
         }
@@ -276,11 +271,6 @@ struct CreateView: View {
             && store.settings.modelID != "base"
     }
 
-    private var downloadActionTitle: String {
-        requiresCloverDownload
-            ? "Download Clover First"
-            : "Download \(selectedVariant?.name ?? "Model")"
-    }
 }
 
 private struct ParameterPill: View {
