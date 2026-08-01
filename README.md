@@ -3,7 +3,12 @@
 Native, private image generation on iPhone with SwiftUI, Core ML, and
 [Clover Image Tiny](https://huggingface.co/neonforestmist/Clover-Image-Tiny).
 
-![Clover Create screen](Screenshots/create.png)
+## Screenshots
+
+| Create | Models & Styles | Library |
+|:---:|:---:|:---:|
+| ![Create screen with a generated image](Screenshots/create-output.png) | ![Model picker: Clover downloadable, styles locked until it is installed](Screenshots/models.png) | ![Library grid of generated images](Screenshots/library.png) |
+| On-device generation | Base first, styles opt-in | Saved artwork |
 
 ## Features
 
@@ -18,7 +23,8 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 - NumPy and PyTorch-compatible random generators
 - Neural Engine, automatic, and GPU compute modes
 - Local artwork library and Photos export
-- One shared model download containing the base and three LoRA style functions
+- Base-first downloads: install Clover, then add only the styles you want
+- Import your own Core ML models from **On My iPhone → Clover → Imported Styles**
 - Visible downloads in **On My iPhone → Clover → Models**
 - Immutable model revisions with byte-count and SHA-256 verification
 
@@ -49,10 +55,14 @@ Downloaded files are visible in the Files app under
 **On My iPhone → Clover → Models**. Existing downloads from earlier builds are
 migrated into that folder when possible.
 
-The iOS 18 model uses Core ML multifunction U-Nets. Clover's base weights are
-stored once, while Monet, Pointillism, and Watercolor Anime remain separate
-rank-16 adapter branches. Selecting a style loads its Core ML function; it does
-not download or store another full U-Net.
+Clover installs first: its shared components (text encoder, VAE, safety
+checker, tokenizer) plus the base U-Net. The Monet, Pointillism, and Watercolor
+Anime styles are then **optional, individual downloads** — each ships only its
+own Core ML U-Net and reuses Clover's already-installed shared components, so a
+style is downloaded only if you choose it. Styles stay locked until Clover is
+installed. You can also side-load your own Core ML model by placing its folder
+in **On My iPhone → Clover → Imported Styles**; it appears in the picker
+automatically.
 
 ## On-device behavior
 
@@ -60,10 +70,10 @@ After installation, prompts and generated images stay on the device. Network
 access is used to refresh the catalog and download model files from Hugging
 Face.
 
-A physical device can use the Apple Neural Engine. The current Simulator
-runtime rejects Core ML multifunction selection, so validate actual generation
-on an iPhone or iPad. The first generation may take longer while Core ML
-compiles and caches its graphs.
+A physical device can use the Apple Neural Engine, so validate real generation
+on an iPhone or iPad; the Simulator runs Core ML on CPU only and is much slower.
+The first generation may take longer while Core ML compiles and caches its
+graphs.
 
 ## Project structure
 
