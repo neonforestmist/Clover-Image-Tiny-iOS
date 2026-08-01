@@ -101,7 +101,7 @@ struct CreateView: View {
                     .background(.quaternary, in: .circle)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(selectedVariant?.name ?? "Clover")
+                    Text(modelManager.displayName(for: store.settings.modelID) ?? "Clover")
                         .font(.headline)
                         .foregroundStyle(.primary)
                     Text(modelStatus)
@@ -256,21 +256,17 @@ struct CreateView: View {
         case let .downloading(progress):
             "Downloading \(progress.formatted(.percent))"
         case .notInstalled:
-            if requiresCloverDownload {
-                "Requires Clover model download"
+            if store.settings.modelID == "base" {
+                "Tap to download Clover"
+            } else if !modelManager.isBaseInstalled {
+                "Install Clover first to unlock this style"
             } else {
-                "Tap to download from Hugging Face"
+                "Tap to add this style"
             }
         case .failed:
             "Download needs attention"
         }
     }
-
-    private var requiresCloverDownload: Bool {
-        modelManager.catalog.schemaVersion >= 2
-            && store.settings.modelID != "base"
-    }
-
 }
 
 private struct ParameterPill: View {

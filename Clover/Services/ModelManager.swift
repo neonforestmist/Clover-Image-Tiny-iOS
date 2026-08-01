@@ -11,8 +11,12 @@ final class ModelManager {
         case failed(String)
     }
 
+    static let baseID = "base"
+
     private(set) var catalog: ModelCatalog
     private(set) var states: [String: InstallState] = [:]
+    /// Core ML models the user side-loaded through the Files app.
+    private(set) var imported: [ModelStorage.ImportedModel] = []
     private(set) var isRefreshing = false
     var errorMessage: String?
 
@@ -21,8 +25,6 @@ final class ModelManager {
     @ObservationIgnored
     private var downloadTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored
-    private var sharedDownloadTask: Task<Void, Never>?
-    @ObservationIgnored
     private let previewInstalled: Bool
 
     init(previewInstalled: Bool? = nil) {
@@ -30,6 +32,7 @@ final class ModelManager {
             ?? ProcessInfo.processInfo.arguments.contains("-ui-testing-preview")
         catalog = Self.cachedCatalog() ?? .bootstrap
         refreshInstallStates()
+        refreshImported()
     }
 
     func refreshCatalog() async {
@@ -58,9 +61,17 @@ final class ModelManager {
         }
     }
 
+    /// Re-scan the Files import folder. Cheap; safe to call when the picker appears.
+    func refreshImported() {
+        imported = ModelStorage.importedModels()
+    }
+
     func state(for id: String) -> InstallState {
         if previewInstalled {
             return .installed
+        }
+        if id.hasPrefix(ModelStorage.importedIDPrefix) {
+            return imported.contains { $0.id == id } ? .installed : .notInstalled
         }
         return states[id] ?? .notInstalled
     }
@@ -69,28 +80,54 @@ final class ModelManager {
         state(for: id) == .installed
     }
 
+    /// Clover's base model must exist before any style can be installed or used.
+    var isBaseInstalled: Bool {
+        isInstalled(Self.baseID)
+    }
+
+    /// A style is locked until the base Clover model is installed.
+    func isLocked(_ variant: ModelCatalog.Variant) -> Bool {
+        variant.id != Self.baseID && !isBaseInstalled
+    }
+
+    /// Whether a Download button should be offered for this variant right now.
+    func canDownload(_ variant: ModelCatalog.Variant) -> Bool {
+        guard !catalog.common.files.isEmpty else { return false }
+        if variant.id == Self.baseID { return true }
+        return isBaseInstalled
+    }
+
     func variant(id: String) -> ModelCatalog.Variant? {
         catalog.variant(id: id)
     }
 
+    func importedModel(id: String) -> ModelStorage.ImportedModel? {
+        imported.first { $0.id == id }
+    }
+
+    /// A friendly name for any selectable model, including imported ones.
+    func displayName(for id: String) -> String? {
+        variant(id: id)?.name ?? importedModel(id: id)?.name
+    }
+
     func download(_ variant: ModelCatalog.Variant) {
-        if catalog.schemaVersion >= 2 {
-            downloadSharedModel(selectedFrom: variant)
+        guard downloadTasks[variant.id] == nil,
+              canDownload(variant) else {
             return
         }
 
-        guard downloadTasks[variant.id] == nil,
-              !variant.files.isEmpty,
-              !catalog.common.files.isEmpty else {
-            return
-        }
+        // Styles reuse Clover's already-installed shared components, so they
+        // never re-download the large base weights.
+        let reuseCommon = variant.id != Self.baseID && isBaseInstalled
+
         states[variant.id] = .downloading(0)
         downloadTasks[variant.id] = Task { [weak self] in
             guard let self else { return }
             do {
                 let resourcesURL = try await downloader.install(
                     variant: variant,
-                    catalog: catalog
+                    catalog: catalog,
+                    reuseCommon: reuseCommon
                 ) { progress in
                     Task { @MainActor in
                         self.states[variant.id] = .downloading(progress)
@@ -112,65 +149,55 @@ final class ModelManager {
     }
 
     func cancelDownload(_ id: String) {
-        if catalog.schemaVersion >= 2 {
-            sharedDownloadTask?.cancel()
-            sharedDownloadTask = nil
-            for variant in catalog.variants {
-                states[variant.id] = .notInstalled
-            }
-            return
-        }
-
         downloadTasks[id]?.cancel()
         downloadTasks[id] = nil
         states[id] = .notInstalled
     }
 
     func remove(_ variant: ModelCatalog.Variant) {
-        if catalog.schemaVersion >= 2 {
-            removeSharedModel()
-            return
+        cancelDownload(variant.id)
+
+        if variant.id == Self.baseID {
+            // Every style links to Clover's shared components, so removing the
+            // base model removes the styles that depend on it too.
+            for style in catalog.variants where style.id != Self.baseID {
+                cancelDownload(style.id)
+                removeInstalledFiles(id: style.id)
+                states[style.id] = .notInstalled
+            }
+            try? FileManager.default.removeItem(
+                at: ModelStorage.sharedURL(revision: catalog.common.revision)
+            )
         }
 
-        cancelDownload(variant.id)
-        let root = ModelStorage.rootURL
-            .appending(path: "Installed", directoryHint: .isDirectory)
-            .appending(path: variant.id, directoryHint: .isDirectory)
-        let variantFiles = ModelStorage.rootURL
-            .appending(path: "Variants", directoryHint: .isDirectory)
-            .appending(path: variant.id, directoryHint: .isDirectory)
-        try? FileManager.default.removeItem(at: root)
-        try? FileManager.default.removeItem(at: variantFiles)
-        ModelStorage.clearInstallation(id: variant.id)
+        removeInstalledFiles(id: variant.id)
         states[variant.id] = .notInstalled
     }
 
     func requiredDownloadSize(for variant: ModelCatalog.Variant) -> Int64 {
-        let commonInstalled = catalog.variants.contains {
-            isInstalled($0.id)
+        if variant.id == Self.baseID {
+            return catalog.common.downloadSize + variant.downloadSize
         }
-        if catalog.schemaVersion >= 2 {
-            return commonInstalled ? 0 : catalog.common.downloadSize
-        }
+        // Once Clover is installed a style only adds its own (often shared and
+        // therefore zero-byte) files.
         return variant.downloadSize
-            + (commonInstalled ? 0 : catalog.common.downloadSize)
+            + (isBaseInstalled ? 0 : catalog.common.downloadSize)
+    }
+
+    private func removeInstalledFiles(id: String) {
+        let installed = ModelStorage.rootURL
+            .appending(path: "Installed", directoryHint: .isDirectory)
+            .appending(path: id, directoryHint: .isDirectory)
+        let variantFiles = ModelStorage.rootURL
+            .appending(path: "Variants", directoryHint: .isDirectory)
+            .appending(path: id, directoryHint: .isDirectory)
+        try? FileManager.default.removeItem(at: installed)
+        try? FileManager.default.removeItem(at: variantFiles)
+        ModelStorage.clearInstallation(id: id)
     }
 
     private func refreshInstallStates() {
-        if catalog.schemaVersion >= 2 {
-            let sharedResources = catalog.variants.lazy.compactMap {
-                ModelStorage.resourcesURL(for: $0.id)
-            }.first(where: ModelStorage.isMultifunctionResourcesDirectory)
-            for variant in catalog.variants {
-                states[variant.id] = sharedResources == nil
-                    ? .notInstalled
-                    : .installed
-            }
-            return
-        }
-
-        for variant in catalog.variants
-        where downloadTasks[variant.id] == nil {
+        for variant in catalog.variants where downloadTasks[variant.id] == nil {
             states[variant.id] = ModelStorage.resourcesURL(for: variant.id) == nil
                 ? .notInstalled
                 : .installed
@@ -193,70 +220,5 @@ final class ModelManager {
             withIntermediateDirectories: true
         )
         try data.write(to: url, options: .atomic)
-    }
-
-    private func downloadSharedModel(
-        selectedFrom variant: ModelCatalog.Variant
-    ) {
-        guard sharedDownloadTask == nil,
-              !catalog.common.files.isEmpty else {
-            return
-        }
-
-        for item in catalog.variants {
-            states[item.id] = .downloading(0)
-        }
-        sharedDownloadTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let resourcesURL = try await downloader.install(
-                    variant: variant,
-                    catalog: catalog
-                ) { progress in
-                    Task { @MainActor in
-                        for item in self.catalog.variants {
-                            self.states[item.id] = .downloading(progress)
-                        }
-                    }
-                }
-                guard !Task.isCancelled else { return }
-                for item in catalog.variants {
-                    ModelStorage.recordInstallation(
-                        id: item.id,
-                        resourcesURL: resourcesURL
-                    )
-                    states[item.id] = .installed
-                }
-            } catch is CancellationError {
-                for item in catalog.variants {
-                    states[item.id] = .notInstalled
-                }
-            } catch {
-                for item in catalog.variants {
-                    states[item.id] = .failed(error.localizedDescription)
-                }
-            }
-            sharedDownloadTask = nil
-        }
-    }
-
-    private func removeSharedModel() {
-        cancelDownload("shared")
-        let fileManager = FileManager.default
-        try? fileManager.removeItem(
-            at: ModelStorage.rootURL.appending(
-                path: "Installed",
-                directoryHint: .isDirectory
-            )
-        )
-        try? fileManager.removeItem(
-            at: ModelStorage.sharedURL(
-                revision: catalog.common.revision
-            )
-        )
-        for item in catalog.variants {
-            ModelStorage.clearInstallation(id: item.id)
-            states[item.id] = .notInstalled
-        }
     }
 }

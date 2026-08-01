@@ -3,6 +3,17 @@ import Foundation
 enum ModelStorage {
     private static let installKeyPrefix = "clover-model-install-"
 
+    /// Prefix marking a model the user side-loaded via the Files app rather
+    /// than one downloaded from the catalog.
+    static let importedIDPrefix = "imported:"
+
+    /// A Core ML model the user placed in On My iPhone › Clover › Imported Styles.
+    struct ImportedModel: Identifiable, Equatable, Sendable {
+        let id: String
+        let name: String
+        let resourcesURL: URL
+    }
+
     static let rootURL: URL = {
         let fileManager = FileManager.default
         let visibleURL = fileManager.urls(
@@ -91,6 +102,82 @@ enum ModelStorage {
             .appending(path: "manifest.json")
     }
 
+    /// The user-visible drop folder for side-loaded Core ML models. It sits at
+    /// the top level of the app's Documents container, so in the Files app it
+    /// appears as On My iPhone › Clover › Imported Styles.
+    static var importedRootURL: URL {
+        let documents = rootURL.deletingLastPathComponent()
+        let url = documents.appending(
+            path: "Imported Styles",
+            directoryHint: .isDirectory
+        )
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.createDirectory(
+                at: url,
+                withIntermediateDirectories: true
+            )
+        }
+        return url
+    }
+
+    /// Every valid Core ML model the user has dropped into the import folder.
+    /// A folder counts if it is itself a usable resources directory or directly
+    /// contains exactly one usable resources directory (e.g. an unzipped
+    /// `Resources` folder from the Core ML conversion tooling).
+    static func importedModels() -> [ImportedModel] {
+        let root = importedRootURL
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var models: [ImportedModel] = []
+        for entry in entries {
+            guard (try? entry.resourceValues(
+                forKeys: [.isDirectoryKey]
+            ).isDirectory) == true else {
+                continue
+            }
+            guard let resources = resolveImportedResources(entry) else {
+                continue
+            }
+            let name = entry.deletingPathExtension().lastPathComponent
+            models.append(
+                ImportedModel(
+                    id: importedIDPrefix + name,
+                    name: name,
+                    resourcesURL: resources
+                )
+            )
+        }
+        return models.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private static func resolveImportedResources(_ folder: URL) -> URL? {
+        if isUsableResourcesDirectory(folder) {
+            return folder
+        }
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        let usable = children.filter {
+            ((try? $0.resourceValues(
+                forKeys: [.isDirectoryKey]
+            ).isDirectory) == true)
+                && isUsableResourcesDirectory($0)
+        }
+        return usable.count == 1 ? usable.first : nil
+    }
+
     static func sharedURL(revision: String) -> URL {
         rootURL
             .appending(path: "Shared", directoryHint: .isDirectory)
@@ -112,6 +199,10 @@ enum ModelStorage {
     }
 
     static func resourcesURL(for id: String) -> URL? {
+        if id.hasPrefix(importedIDPrefix) {
+            return importedModels().first { $0.id == id }?.resourcesURL
+        }
+
         if let stored = UserDefaults.standard.string(
             forKey: installKeyPrefix + id
         ) {

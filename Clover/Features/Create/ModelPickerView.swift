@@ -5,63 +5,15 @@ struct ModelPickerView: View {
     @Binding var settings: GenerationSettings
     let manager: ModelManager
 
+    @State private var confirmingBaseRemoval = false
+
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    ForEach(manager.catalog.variants) { variant in
-                        ModelVariantRow(
-                            variant: variant,
-                            state: manager.state(for: variant.id),
-                            isSelected: settings.modelID == variant.id,
-                            downloadSize: modelDownloadSize(for: variant),
-                            requiresClover: manager.catalog.schemaVersion >= 2
-                                && variant.id != "base",
-                            canDownload: !manager.catalog.common.files.isEmpty
-                                && (
-                                    manager.catalog.schemaVersion >= 2
-                                    || !variant.files.isEmpty
-                                ),
-                            select: {
-                                settings.modelID = variant.id
-                                settings.persist()
-                                HapticManager.selection()
-                            },
-                            download: {
-                                manager.download(variant)
-                            },
-                            cancel: {
-                                manager.cancelDownload(variant.id)
-                            },
-                            remove: {
-                                if settings.modelID == variant.id {
-                                    settings.modelID = "base"
-                                    settings.persist()
-                                }
-                                manager.remove(variant)
-                            }
-                        )
-                    }
-                } header: {
-                    Text("On-device models")
-                } footer: {
-                    Text(
-                        "Clover is a required \(formattedCloverSize) download. Each style is a 648 MB model that reuses Clover’s stored base weights, so choosing a style does not add another 648 MB download. Files are verified with SHA-256 and visible in On My iPhone › Clover › Models."
-                    )
-                }
-
-                Section {
-                    Link(destination: manager.catalog.hubURL) {
-                        Label(
-                            "View Core ML catalog",
-                            systemImage: "safari"
-                        )
-                    }
-                } footer: {
-                    Text(
-                        "Generation stays on this iPhone after the selected model is installed."
-                    )
-                }
+                cloverSection
+                stylesSection
+                importedSection
+                catalogSection
             }
             .navigationTitle("Models & Styles")
             .navigationBarTitleDisplayMode(.inline)
@@ -69,6 +21,7 @@ struct ModelPickerView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         Task { await manager.refreshCatalog() }
+                        manager.refreshImported()
                     } label: {
                         if manager.isRefreshing {
                             ProgressView()
@@ -80,14 +33,13 @@ struct ModelPickerView: View {
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
             .task {
                 await manager.refreshCatalog()
+                manager.refreshImported()
             }
             .alert(
                 "Couldn’t Refresh Models",
@@ -101,31 +53,174 @@ struct ModelPickerView: View {
                 Text(manager.errorMessage ?? "")
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
     }
 
-    private func modelDownloadSize(
-        for variant: ModelCatalog.Variant
-    ) -> Int64 {
-        if manager.catalog.schemaVersion >= 2 {
-            return manager.catalog.common.downloadSize
+    // MARK: - Clover base model
+
+    @ViewBuilder
+    private var cloverSection: some View {
+        if let base = manager.catalog.baseVariant {
+            Section {
+                ModelVariantRow(
+                    variant: base,
+                    state: manager.state(for: base.id),
+                    isSelected: settings.modelID == base.id,
+                    isLocked: false,
+                    downloadSize: manager.requiredDownloadSize(for: base),
+                    canDownload: manager.canDownload(base),
+                    select: { select(base.id) },
+                    download: { manager.download(base) },
+                    cancel: { manager.cancelDownload(base.id) },
+                    remove: { confirmingBaseRemoval = true }
+                )
+            } header: {
+                Text("Clover Model")
+            } footer: {
+                Text(
+                    "Download Clover first — it’s a one-time \(formattedCloverSize) model that runs entirely on your iPhone. Files are verified with SHA-256 and stored in On My iPhone › Clover › Models."
+                )
+            }
+            .confirmationDialog(
+                "Remove Clover and all styles?",
+                isPresented: $confirmingBaseRemoval,
+                titleVisibility: .visible
+            ) {
+                Button("Remove Downloads", role: .destructive) {
+                    if settings.modelID != base.id {
+                        settings.modelID = base.id
+                        settings.persist()
+                    }
+                    manager.remove(base)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Styles reuse Clover’s weights, so they’ll be removed too. You can download them again anytime.")
+            }
         }
-        return manager.requiredDownloadSize(for: variant)
+    }
+
+    // MARK: - Styles
+
+    @ViewBuilder
+    private var stylesSection: some View {
+        let styles = manager.catalog.styleVariants
+        if !styles.isEmpty {
+            Section {
+                ForEach(styles) { style in
+                    ModelVariantRow(
+                        variant: style,
+                        state: manager.state(for: style.id),
+                        isSelected: settings.modelID == style.id,
+                        isLocked: manager.isLocked(style),
+                        downloadSize: manager.requiredDownloadSize(for: style),
+                        canDownload: manager.canDownload(style),
+                        select: { select(style.id) },
+                        download: { manager.download(style) },
+                        cancel: { manager.cancelDownload(style.id) },
+                        remove: { removeStyle(style) }
+                    )
+                }
+            } header: {
+                Text("Styles")
+            } footer: {
+                Text(
+                    manager.isBaseInstalled
+                        ? "Each style reuses Clover’s stored weights, so adding one doesn’t re-download the full model. Add a prompt trigger to apply it."
+                        : "Install Clover above to unlock these styles."
+                )
+            }
+        }
+    }
+
+    // MARK: - Imported styles
+
+    @ViewBuilder
+    private var importedSection: some View {
+        Section {
+            if manager.imported.isEmpty {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("No imported models yet")
+                            .font(.subheadline)
+                        Text("Add your own below.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "tray")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            } else {
+                ForEach(manager.imported) { model in
+                    ImportedModelRow(
+                        model: model,
+                        isSelected: settings.modelID == model.id,
+                        select: { select(model.id) }
+                    )
+                }
+            }
+
+            Button {
+                manager.refreshImported()
+                HapticManager.selection()
+            } label: {
+                Label("Rescan Files", systemImage: "arrow.clockwise")
+            }
+        } header: {
+            Text("Imported Styles")
+        } footer: {
+            Text(
+                "Bring your own Core ML model: in the Files app, open On My iPhone › Clover › Imported Styles and drop the model’s folder inside. It appears here automatically — no base model required."
+            )
+        }
+    }
+
+    private var catalogSection: some View {
+        Section {
+            Link(destination: manager.catalog.hubURL) {
+                Label("View Core ML Catalog", systemImage: "safari")
+            }
+        } footer: {
+            Text("Generation stays on this iPhone once a model is installed.")
+        }
+    }
+
+    // MARK: - Actions
+
+    private func select(_ id: String) {
+        settings.modelID = id
+        settings.persist()
+        HapticManager.selection()
+    }
+
+    private func removeStyle(_ style: ModelCatalog.Variant) {
+        if settings.modelID == style.id {
+            settings.modelID = ModelManager.baseID
+            settings.persist()
+        }
+        manager.remove(style)
     }
 
     private var formattedCloverSize: String {
-        let bytes = manager.catalog.common.downloadSize
+        // The full Clover install is the shared components plus the base U-Net.
+        let bytes = manager.catalog.baseVariant
+            .map { manager.requiredDownloadSize(for: $0) }
+            ?? manager.catalog.common.downloadSize
         guard bytes > 0 else { return "≈1.5 GB" }
         return "≈\(bytes.formatted(.byteCount(style: .memory)))"
     }
 }
 
+// MARK: - Catalog variant row
+
 private struct ModelVariantRow: View {
     let variant: ModelCatalog.Variant
     let state: ModelManager.InstallState
     let isSelected: Bool
+    let isLocked: Bool
     let downloadSize: Int64
-    let requiresClover: Bool
     let canDownload: Bool
     let select: () -> Void
     let download: () -> Void
@@ -134,34 +229,19 @@ private struct ModelVariantRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: variant.id == "base"
-                    ? "leaf.fill"
-                    : "paintpalette.fill")
-                    .font(.title3)
-                    .foregroundStyle(.cloverGreen)
-                    .frame(width: 28, height: 28)
-                    .background(.quaternary, in: .circle)
+            HStack(alignment: .center, spacing: 12) {
+                icon
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(variant.name)
                         .font(.headline)
+                        .foregroundStyle(isLocked ? .secondary : .primary)
                     Text(variant.summary)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    if variant.id == "base" {
-                        Text("Clover download: \(formattedDownloadSize)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if let formattedStyleModelSize {
-                        Text("\(formattedStyleModelSize) style model")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
                     if let trigger = variant.trigger {
-                        Text("Prompt trigger: \(trigger)")
+                        Text("Trigger: \(trigger)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -186,70 +266,75 @@ private struct ModelVariantRow: View {
             }
         }
         .padding(.vertical, 4)
+        .contentShape(.rect)
+        .onTapGesture {
+            if state == .installed, !isSelected { select() }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("model-\(variant.id)")
         .contextMenu {
-            if state == .installed, !requiresClover {
-                Button("Remove Download", role: .destructive) {
-                    remove()
-                }
+            if state == .installed {
+                Button("Remove Download", role: .destructive, action: remove)
             }
         }
+    }
+
+    private var icon: some View {
+        Image(systemName: iconName)
+            .font(.title3)
+            .foregroundStyle(isLocked ? AnyShapeStyle(.secondary) : AnyShapeStyle(.cloverGreen))
+            .frame(width: 30, height: 30)
+            .background(.quaternary, in: .circle)
+    }
+
+    private var iconName: String {
+        if isLocked { return "lock.fill" }
+        return variant.id == ModelManager.baseID ? "leaf.fill" : "paintpalette.fill"
     }
 
     @ViewBuilder
     private var action: some View {
         switch state {
         case .installed:
-            Button {
-                select()
-            } label: {
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.cloverGreen)
-                } else {
-                    Text("Use")
-                }
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(
-                isSelected
-                    ? "\(variant.name), selected"
-                    : "Use \(variant.name)"
-            )
-        case .downloading:
-            Button("Cancel", role: .cancel) {
-                cancel()
-            }
-            .buttonStyle(.borderless)
-        case .notInstalled, .failed:
-            if requiresClover {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Requires Clover")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                    Text(styleModelSizeLabel)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityLabel(
-                    "\(variant.name) is a \(styleModelSizeLabel) and requires Clover"
-                )
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.cloverGreen)
+                    .accessibilityLabel("\(variant.name), selected")
             } else {
-                Button {
-                    download()
-                } label: {
+                Button("Use", action: select)
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Use \(variant.name)")
+            }
+
+        case .downloading:
+            Button("Cancel", role: .cancel, action: cancel)
+                .buttonStyle(.borderless)
+
+        case .notInstalled, .failed:
+            if isLocked {
+                Label("Locked", systemImage: "lock.fill")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(.tertiary)
+                    .accessibilityLabel("\(variant.name) is locked until Clover is installed")
+            } else {
+                Button(action: download) {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Image(systemName: "arrow.down.circle")
+                        Image(systemName: state.isFailed
+                            ? "arrow.clockwise.circle"
+                            : "arrow.down.circle")
                             .font(.title3)
-                        Text(formattedDownloadSize)
+                        Text(downloadSize > 0 ? formattedDownloadSize : "Included")
                             .font(.caption2)
                     }
                 }
                 .buttonStyle(.borderless)
                 .disabled(!canDownload)
-                .accessibilityLabel("Download \(variant.name)")
+                .accessibilityLabel(
+                    state.isFailed
+                        ? "Retry download of \(variant.name)"
+                        : "Download \(variant.name)"
+                )
             }
         }
     }
@@ -257,15 +342,56 @@ private struct ModelVariantRow: View {
     private var formattedDownloadSize: String {
         "≈\(downloadSize.formatted(.byteCount(style: .memory)))"
     }
+}
 
-    private var formattedStyleModelSize: String? {
-        guard let styleModelSize = variant.styleModelSize else { return nil }
-        let megabytes = Int((Double(styleModelSize) / 1_000_000).rounded())
-        return "\(megabytes) MB"
+// MARK: - Imported model row
+
+private struct ImportedModelRow: View {
+    let model: ModelStorage.ImportedModel
+    let isSelected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "square.and.arrow.down.on.square.fill")
+                .font(.title3)
+                .foregroundStyle(.cloverGreen)
+                .frame(width: 30, height: 30)
+                .background(.quaternary, in: .circle)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.name)
+                    .font(.headline)
+                Text("Imported from Files")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.cloverGreen)
+                    .accessibilityLabel("\(model.name), selected")
+            } else {
+                Button("Use", action: select)
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Use \(model.name)")
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(.rect)
+        .onTapGesture { if !isSelected { select() } }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("imported-\(model.name)")
     }
+}
 
-    private var styleModelSizeLabel: String {
-        "\(formattedStyleModelSize ?? formattedDownloadSize) style model"
+private extension ModelManager.InstallState {
+    var isFailed: Bool {
+        if case .failed = self { return true }
+        return false
     }
 }
 

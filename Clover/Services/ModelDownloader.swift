@@ -25,6 +25,7 @@ final class ModelDownloader: Sendable {
     func install(
         variant: ModelCatalog.Variant,
         catalog: ModelCatalog,
+        reuseCommon: Bool = false,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> URL {
         let commonRoot = ModelStorage.sharedURL(
@@ -34,19 +35,25 @@ final class ModelDownloader: Sendable {
             id: variant.id,
             revision: variant.revision
         )
-        let totalBytes = catalog.common.downloadSize + variant.downloadSize
+        // When Clover's shared components are already installed, a style only
+        // needs its own (small or empty) files, so bill progress against those.
+        let totalBytes = reuseCommon
+            ? variant.downloadSize
+            : catalog.common.downloadSize + variant.downloadSize
         var completedBytes: Int64 = 0
 
-        completedBytes = try await download(
-            files: catalog.common.files,
-            revision: catalog.common.revision,
-            repository: catalog.common.repository,
-            catalog: catalog,
-            destinationRoot: commonRoot,
-            completedBytes: completedBytes,
-            totalBytes: totalBytes,
-            progress: progress
-        )
+        if !reuseCommon {
+            completedBytes = try await download(
+                files: catalog.common.files,
+                revision: catalog.common.revision,
+                repository: catalog.common.repository,
+                catalog: catalog,
+                destinationRoot: commonRoot,
+                completedBytes: completedBytes,
+                totalBytes: totalBytes,
+                progress: progress
+            )
+        }
         completedBytes = try await download(
             files: variant.files,
             revision: variant.revision,

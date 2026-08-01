@@ -88,6 +88,9 @@ struct ModelCatalog: Codable, Equatable, Sendable {
         string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-CoreML/resolve/main/manifest.json"
     )!
 
+    // Metadata-only fallback shown before the first catalog refresh. Sizes and
+    // triggers mirror the live per-style catalog; `files` are intentionally
+    // empty so downloads wait for the verified manifest fetched on appear.
     static let bootstrap = ModelCatalog(
         schemaVersion: 2,
         catalogVersion: "loading",
@@ -97,7 +100,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
         common: ResourceGroup(
             repository: nil,
             revision: "",
-            downloadSize: 0,
+            downloadSize: 955_481_353,
             files: []
         ),
         variants: [
@@ -108,11 +111,53 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 trigger: nil,
                 sourceLoRA: nil,
                 dataset: nil,
-                functionName: "base",
+                functionName: nil,
                 repository: nil,
                 revision: "",
-                downloadSize: 0,
+                downloadSize: 647_756_972,
                 styleModelSize: nil,
+                files: []
+            ),
+            Variant(
+                id: "monet",
+                name: "Monet",
+                summary: "Luminous impressionist color and brushwork",
+                trigger: "Monet Style",
+                sourceLoRA: "neonforestmist/clover-image-tiny-monet-lora",
+                dataset: "neonforestmist/GPT_Monet_Style_Images",
+                functionName: nil,
+                repository: "neonforestmist/clover-image-tiny-monet-lora-coreml",
+                revision: "",
+                downloadSize: 647_756_986,
+                styleModelSize: 647_756_986,
+                files: []
+            ),
+            Variant(
+                id: "pointillism",
+                name: "Pointillism",
+                summary: "Dense paint dots and luminous optical color",
+                trigger: "pointillism painting",
+                sourceLoRA: "neonforestmist/clover-image-tiny-pointillism-lora",
+                dataset: "neonforestmist/GPT_Pointillism_Style_Images",
+                functionName: nil,
+                repository: "neonforestmist/clover-image-tiny-pointillism-lora-coreml",
+                revision: "",
+                downloadSize: 647_756_998,
+                styleModelSize: 647_756_998,
+                files: []
+            ),
+            Variant(
+                id: "watercolor-anime",
+                name: "Watercolor Anime",
+                summary: "Transparent washes, soft ink, and paper texture",
+                trigger: "watercolor anime",
+                sourceLoRA: "neonforestmist/clover-image-tiny-watercolor-anime-lora",
+                dataset: "neonforestmist/GPT_Watercolor_Anime_Style_Images",
+                functionName: nil,
+                repository: "neonforestmist/clover-image-tiny-watercolor-anime-lora-coreml",
+                revision: "",
+                downloadSize: 647_756_998,
+                styleModelSize: 647_756_998,
                 files: []
             )
         ]
@@ -120,6 +165,14 @@ struct ModelCatalog: Codable, Equatable, Sendable {
 
     func variant(id: String) -> Variant? {
         variants.first { $0.id == id }
+    }
+
+    var baseVariant: Variant? {
+        variants.first { $0.id == "base" }
+    }
+
+    var styleVariants: [Variant] {
+        variants.filter { $0.id != "base" }
     }
 
     func downloadURL(
