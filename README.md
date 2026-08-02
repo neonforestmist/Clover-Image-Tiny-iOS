@@ -60,9 +60,11 @@ checker, tokenizer) plus one stateful base U-Net, about 1.5 GB total. Monet,
 Pointillism, and Watercolor Anime are then **optional 6,927,128-byte LoRA
 downloads**. The Swift pipeline converts the selected adapter to FP16 and loads
 it into the U-Net's mutable Core ML state; it never downloads another ~648 MB
-U-Net. Styles stay locked until Clover is installed. You can also side-load
-your own Core ML model by placing its folder in **On My iPhone → Clover →
-Imported Styles**; it appears in the picker automatically.
+U-Net. Each adapter comes from its compact `-lora-coreml` Hugging Face repo,
+which contains only the adapter, state mapping, model card, and license. Styles
+stay locked until Clover is installed. You can also side-load your own Core ML
+model by placing its folder in **On My iPhone → Clover → Imported Styles**; it
+appears in the picker automatically.
 
 ## On-device behavior
 

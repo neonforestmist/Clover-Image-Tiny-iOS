@@ -124,7 +124,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 sourceLoRA: "neonforestmist/clover-image-tiny-monet-lora",
                 dataset: "neonforestmist/GPT_Monet_Style_Images",
                 functionName: nil,
-                repository: "neonforestmist/clover-image-tiny-monet-lora",
+                repository: "neonforestmist/clover-image-tiny-monet-lora-coreml",
                 revision: "",
                 downloadSize: 6_927_128,
                 files: []
@@ -137,7 +137,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 sourceLoRA: "neonforestmist/clover-image-tiny-pointillism-lora",
                 dataset: "neonforestmist/GPT_Pointillism_Style_Images",
                 functionName: nil,
-                repository: "neonforestmist/clover-image-tiny-pointillism-lora",
+                repository: "neonforestmist/clover-image-tiny-pointillism-lora-coreml",
                 revision: "",
                 downloadSize: 6_927_128,
                 files: []
@@ -150,7 +150,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 sourceLoRA: "neonforestmist/clover-image-tiny-watercolor-anime-lora",
                 dataset: "neonforestmist/GPT_Watercolor_Anime_Style_Images",
                 functionName: nil,
-                repository: "neonforestmist/clover-image-tiny-watercolor-anime-lora",
+                repository: "neonforestmist/clover-image-tiny-watercolor-anime-lora-coreml",
                 revision: "",
                 downloadSize: 6_927_128,
                 files: []
