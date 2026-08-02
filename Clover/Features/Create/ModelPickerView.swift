@@ -126,7 +126,7 @@ struct ModelPickerView: View {
             } footer: {
                 Text(
                     manager.isBaseInstalled
-                        ? "Each style is a separate 6.9 MB LoRA adapter that reuses the one-time Clover download. Include the trigger shown under the style in your prompt."
+                        ? "Each style is a named 6.9 MB LoRA file that reuses the one-time Clover download. Include the trigger shown under the style in your prompt."
                         : "Install Clover above to unlock these styles."
                 )
             }
@@ -245,6 +245,12 @@ private struct ModelVariantRow: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    if let filename = variant.publicWeightsFilename {
+                        Text(filename)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
                 }
 
                 Spacer(minLength: 8)
@@ -280,16 +286,13 @@ private struct ModelVariantRow: View {
     }
 
     private var icon: some View {
-        Image(systemName: iconName)
-            .font(.title3)
+        Image(variant.iconAssetName)
+            .resizable()
+            .scaledToFit()
+            .padding(6)
             .foregroundStyle(isLocked ? AnyShapeStyle(.secondary) : AnyShapeStyle(.cloverGreen))
             .frame(width: 30, height: 30)
             .background(.quaternary, in: .circle)
-    }
-
-    private var iconName: String {
-        if isLocked { return "lock.fill" }
-        return variant.id == ModelManager.baseID ? "leaf.fill" : "paintpalette.fill"
     }
 
     @ViewBuilder

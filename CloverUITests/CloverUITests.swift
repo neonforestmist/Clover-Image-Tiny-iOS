@@ -26,7 +26,11 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(app.sliders["steps-slider"].exists)
         XCTAssertTrue(app.sliders["guidance-slider"].exists)
         XCTAssertTrue(app.steppers["image-count-stepper"].exists)
-        XCTAssertTrue(app.textFields["seed-field"].exists)
+        let seed = app.textFields["seed-field"]
+        if !seed.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(seed.waitForExistence(timeout: 3))
         app.buttons["Done"].tap()
 
         let prompt = app.textFields["prompt-field"]

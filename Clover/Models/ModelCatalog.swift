@@ -60,6 +60,30 @@ struct ModelCatalog: Codable, Equatable, Sendable {
             functionName
                 ?? id.replacingOccurrences(of: "-", with: "_")
         }
+
+        var iconAssetName: String {
+            switch id {
+            case "monet": "StyleIconMonet"
+            case "pointillism": "StyleIconPointillism"
+            case "watercolor-anime": "StyleIconWatercolorAnime"
+            default: "StyleIconClover"
+            }
+        }
+
+        var publicWeightsFilename: String? {
+            guard id != "base" else { return nil }
+            if let remotePath = files.first(where: {
+                $0.remotePath.hasSuffix(".safetensors")
+            })?.remotePath {
+                return URL(filePath: remotePath).lastPathComponent
+            }
+            switch id {
+            case "monet": return "Monet.safetensors"
+            case "pointillism": return "Pointillism.safetensors"
+            case "watercolor-anime": return "Watercolor-Anime.safetensors"
+            default: return nil
+            }
+        }
     }
 
     let schemaVersion: Int

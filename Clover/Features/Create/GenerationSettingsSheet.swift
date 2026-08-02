@@ -53,10 +53,18 @@ struct GenerationSettingsSheet: View {
                         in: 1...4
                     )
                     .accessibilityIdentifier("image-count-stepper")
+
+                    Picker("Output crop", selection: $settings.outputRatio) {
+                        ForEach(GenerationSettings.OutputRatio.allCases) { ratio in
+                            Text("\(ratio.title) · \(ratio.dimensions)")
+                                .tag(ratio)
+                        }
+                    }
+                    .accessibilityIdentifier("output-ratio-picker")
                 } header: {
                     Text("Generation")
                 } footer: {
-                    Text("More steps and images take longer. Output is fixed at 512×512.")
+                    Text("Clover generates at 512×512. Non-square output uses a centered crop, so it adds no model download.")
                 }
 
                 Section("Seed") {
@@ -111,7 +119,11 @@ struct GenerationSettingsSheet: View {
                 }
 
                 Section {
-                    LabeledContent("Resolution", value: "512 × 512")
+                    LabeledContent(
+                        "Output",
+                        value: settings.outputRatio.dimensions
+                    )
+                    LabeledContent("Generation", value: "512 × 512")
                     LabeledContent("Model", value: settings.modelID.capitalized)
                     LabeledContent("Runs", value: "On device")
                 }

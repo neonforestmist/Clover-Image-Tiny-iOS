@@ -58,13 +58,18 @@ migrated into that folder when possible.
 Clover installs first: its shared components (text encoder, VAE, safety
 checker, tokenizer) plus one stateful base U-Net, about 1.5 GB total. Monet,
 Pointillism, and Watercolor Anime are then **optional 6,927,128-byte LoRA
-downloads**. The Swift pipeline converts the selected adapter to FP16 and loads
-it into the U-Net's mutable Core ML state; it never downloads another ~648 MB
-U-Net. Each adapter comes from its compact `-lora-coreml` Hugging Face repo,
-which contains only the adapter, state mapping, model card, and license. Styles
-stay locked until Clover is installed. You can also side-load your own Core ML
-model by placing its folder in **On My iPhone → Clover → Imported Styles**; it
-appears in the picker automatically.
+style downloads**: `Monet.safetensors`, `Pointillism.safetensors`, and
+`Watercolor-Anime.safetensors`. The Swift pipeline converts the selected style
+weights to FP16 and loads them into the U-Net's mutable Core ML state; it never
+downloads another ~648 MB U-Net. Each style comes from its compact
+`-lora-coreml` Hugging Face repo, which contains only the named style weights,
+state mapping, model card, and license. Styles stay locked until Clover is
+installed. You can also side-load your own Core ML model by placing its folder
+in **On My iPhone → Clover → Imported Styles**; it appears in the picker
+automatically.
+
+Output generation remains 512 × 512. The app can save centered 1:1, 4:5, 5:4,
+9:16, and 16:9 crops without downloading additional U-Net variants.
 
 ## On-device behavior
 
@@ -72,7 +77,7 @@ After installation, prompts and generated images stay on the device. Network
 access is used to refresh the catalog and download model files from Hugging
 Face.
 
-The stateful U-Net runs with CPU and GPU compute because its mutable adapter
+The stateful U-Net runs with CPU and GPU compute because its mutable style
 buffers are not execution-planned reliably on the Neural Engine. Other pipeline
 components still honor the selected compute preference. Validate real
 generation on an iPhone or iPad; the Simulator is suitable for UI testing. The
@@ -94,6 +99,21 @@ The app vendors the small Swift runtime from Apple's
 Its model loader is adapted to create an iOS 18 `MLState`, populate 144 mutable
 LoRA tensors from a standard Diffusers safetensors file, and keep that state for
 every denoising step. Apple's license is retained in the vendored package.
+
+The model-picker artwork comes from the MIT-licensed Phosphor collection via
+Iconify. See [THIRD_PARTY_ASSETS.md](THIRD_PARTY_ASSETS.md) for attribution.
+
+### Local safety-checker override
+
+Safety checking is enabled by default. To disable it only for a local Xcode
+run, duplicate the `Clover` scheme, make the duplicate unshared, then add this
+Run argument:
+
+```text
+-DisableSafetyChecker YES
+```
+
+The unshared scheme is stored under `xcuserdata` and is not staged to GitHub.
 
 ## Regenerate the Xcode project
 

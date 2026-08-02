@@ -1,6 +1,61 @@
 import Foundation
 
 struct GenerationSettings: Codable, Equatable, Sendable {
+    enum OutputRatio: String, Codable, CaseIterable, Identifiable, Sendable {
+        case square
+        case portrait
+        case landscape
+        case story
+        case cinematic
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .square: "Square"
+            case .portrait: "Portrait"
+            case .landscape: "Landscape"
+            case .story: "Story"
+            case .cinematic: "Cinematic"
+            }
+        }
+
+        var dimensions: String {
+            switch self {
+            case .square: "1:1"
+            case .portrait: "4:5"
+            case .landscape: "5:4"
+            case .story: "9:16"
+            case .cinematic: "16:9"
+            }
+        }
+
+        var widthOverHeight: CGFloat {
+            switch self {
+            case .square: 1
+            case .portrait: 4.0 / 5.0
+            case .landscape: 5.0 / 4.0
+            case .story: 9.0 / 16.0
+            case .cinematic: 16.0 / 9.0
+            }
+        }
+
+        func croppedSize(from size: CGSize) -> CGSize {
+            let sourceRatio = size.width / size.height
+            let targetRatio = widthOverHeight
+            if targetRatio < sourceRatio {
+                return CGSize(
+                    width: (size.height * targetRatio).rounded(),
+                    height: size.height
+                )
+            }
+            return CGSize(
+                width: size.width,
+                height: (size.width / targetRatio).rounded()
+            )
+        }
+    }
+
     enum Scheduler: String, Codable, CaseIterable, Identifiable, Sendable {
         case pndm
         case dpmSolver
@@ -70,6 +125,7 @@ struct GenerationSettings: Codable, Equatable, Sendable {
     var randomGenerator = RandomGenerator.numpy
     var computeTarget = ComputeTarget.neuralEngine
     var modelID = "base"
+    var outputRatio = OutputRatio.square
 
     static let defaultsKey = "generation-settings"
 
@@ -84,6 +140,7 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         case randomGenerator
         case computeTarget
         case modelID
+        case outputRatio
     }
 
     init() {}
@@ -131,6 +188,10 @@ struct GenerationSettings: Codable, Equatable, Sendable {
             String.self,
             forKey: .modelID
         ) ?? defaults.modelID
+        outputRatio = try container.decodeIfPresent(
+            OutputRatio.self,
+            forKey: .outputRatio
+        ) ?? defaults.outputRatio
     }
 
     static func restored() -> Self {
@@ -168,6 +229,7 @@ struct GenerationSnapshot: Codable, Equatable, Sendable {
     let randomGenerator: GenerationSettings.RandomGenerator
     let computeTarget: GenerationSettings.ComputeTarget
     let modelID: String?
+    let outputRatio: GenerationSettings.OutputRatio?
 
     init(settings: GenerationSettings, imageIndex: Int) {
         prompt = settings.trimmedPrompt
@@ -180,5 +242,6 @@ struct GenerationSnapshot: Codable, Equatable, Sendable {
         randomGenerator = settings.randomGenerator
         computeTarget = settings.computeTarget
         modelID = settings.modelID
+        outputRatio = settings.outputRatio
     }
 }

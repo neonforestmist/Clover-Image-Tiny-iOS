@@ -7,6 +7,10 @@ enum CloverPipelineFactory {
         let functions: [String: String]
     }
 
+    private static var isSafetyCheckerDisabled: Bool {
+        UserDefaults.standard.bool(forKey: "DisableSafetyChecker")
+    }
+
     static func make(
         resourcesURL: URL,
         modelID: String,
@@ -52,6 +56,7 @@ enum CloverPipelineFactory {
                 resourcesAt: resourcesURL,
                 controlNet: [],
                 configuration: configuration,
+                disableSafety: isSafetyCheckerDisabled,
                 reduceMemory: true
             )
         }
@@ -80,12 +85,10 @@ enum CloverPipelineFactory {
             modelAt: urls.decoderURL,
             configuration: configuration
         )
-        let safetyChecker: SafetyChecker? = FileManager.default.fileExists(
-            atPath: urls.safetyCheckerURL.path
-        ) ? SafetyChecker(
-            modelAt: urls.safetyCheckerURL,
+        let safetyChecker = makeSafetyChecker(
+            at: urls.safetyCheckerURL,
             configuration: configuration
-        ) : nil
+        )
 
         return StableDiffusionPipeline(
             textEncoder: textEncoder,
@@ -127,12 +130,10 @@ enum CloverPipelineFactory {
             modelAt: urls.decoderURL,
             configuration: configuration
         )
-        let safetyChecker: SafetyChecker? = FileManager.default.fileExists(
-            atPath: urls.safetyCheckerURL.path
-        ) ? SafetyChecker(
-            modelAt: urls.safetyCheckerURL,
+        let safetyChecker = makeSafetyChecker(
+            at: urls.safetyCheckerURL,
             configuration: configuration
-        ) : nil
+        )
 
         return StableDiffusionPipeline(
             textEncoder: textEncoder,
@@ -141,6 +142,20 @@ enum CloverPipelineFactory {
             encoder: nil,
             safetyChecker: safetyChecker,
             reduceMemory: true
+        )
+    }
+
+    private static func makeSafetyChecker(
+        at url: URL,
+        configuration: MLModelConfiguration
+    ) -> SafetyChecker? {
+        guard !isSafetyCheckerDisabled,
+              FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        return SafetyChecker(
+            modelAt: url,
+            configuration: configuration
         )
     }
 }

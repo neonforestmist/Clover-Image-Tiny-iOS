@@ -149,7 +149,9 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
             throw GenerationError.cancelled
         }
 
-        let safeImages = images.compactMap { $0 }.map(GeneratedImage.init)
+        let safeImages = images.compactMap { $0 }.compactMap {
+            $0.cropped(to: settings.outputRatio)
+        }.map(GeneratedImage.init)
         guard !safeImages.isEmpty else {
             throw GenerationError.noSafeImages
         }
@@ -175,7 +177,28 @@ final class PreviewGenerationService: ImageGenerating, @unchecked Sendable {
         guard let image = UIImage(named: "SampleOutput")?.cgImage else {
             throw GenerationError.missingResources
         }
-        return (0..<settings.imageCount).map { _ in GeneratedImage(cgImage: image) }
+        guard let cropped = image.cropped(to: settings.outputRatio) else {
+            throw GenerationError.missingResources
+        }
+        return (0..<settings.imageCount).map { _ in
+            GeneratedImage(cgImage: cropped)
+        }
+    }
+}
+
+extension CGImage {
+    func cropped(
+        to outputRatio: GenerationSettings.OutputRatio
+    ) -> CGImage? {
+        let source = CGSize(width: width, height: height)
+        let target = outputRatio.croppedSize(from: source)
+        let rect = CGRect(
+            x: ((source.width - target.width) / 2).rounded(.down),
+            y: ((source.height - target.height) / 2).rounded(.down),
+            width: target.width,
+            height: target.height
+        )
+        return cropping(to: rect)
     }
 }
 

@@ -48,6 +48,7 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertEqual(snapshot.seed, 41)
         XCTAssertEqual(snapshot.imageIndex, 2)
         XCTAssertEqual(snapshot.modelID, "base")
+        XCTAssertEqual(snapshot.outputRatio, .square)
     }
 
     func testPromptTrimming() {
@@ -80,6 +81,24 @@ final class GenerationSettingsTests: XCTestCase {
         )
 
         XCTAssertEqual(settings.modelID, "base")
+        XCTAssertEqual(settings.outputRatio, .square)
+    }
+
+    func testOutputRatiosCropA512SquareWithoutResizing() {
+        let source = CGSize(width: 512, height: 512)
+
+        XCTAssertEqual(
+            GenerationSettings.OutputRatio.square.croppedSize(from: source),
+            CGSize(width: 512, height: 512)
+        )
+        XCTAssertEqual(
+            GenerationSettings.OutputRatio.portrait.croppedSize(from: source),
+            CGSize(width: 410, height: 512)
+        )
+        XCTAssertEqual(
+            GenerationSettings.OutputRatio.cinematic.croppedSize(from: source),
+            CGSize(width: 512, height: 288)
+        )
     }
 
     func testCatalogBuildsPinnedHuggingFaceURL() {
@@ -112,7 +131,7 @@ final class GenerationSettingsTests: XCTestCase {
     func testCatalogRoutesStyleFilesToTheirOwnRepository() {
         let file = ModelCatalog.ResourceFile(
             path: "Adapter.safetensors",
-            remotePath: "Adapter.safetensors",
+            remotePath: "Monet.safetensors",
             size: 6_927_128,
             sha256: "abc"
         )
@@ -125,7 +144,7 @@ final class GenerationSettingsTests: XCTestCase {
 
         XCTAssertEqual(
             url.path,
-            "/neonforestmist/clover-image-tiny-monet-lora-coreml/resolve/cafef00d/Adapter.safetensors"
+            "/neonforestmist/clover-image-tiny-monet-lora-coreml/resolve/cafef00d/Monet.safetensors"
         )
     }
 
@@ -200,7 +219,7 @@ final class GenerationSettingsTests: XCTestCase {
                 "download_size": 6927128,
                 "files": [{
                   "path": "Adapter.safetensors",
-                  "remote_path": "Adapter.safetensors",
+                  "remote_path": "Watercolor-Anime.safetensors",
                   "size": 6927128,
                   "sha256": "37153c3084bf50c0355813c167da61612ed24695493c1d9479ecdb0e9cd958f2"
                 }]
@@ -225,7 +244,11 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertEqual(watercolor.files.first?.path, "Adapter.safetensors")
         XCTAssertEqual(
             watercolor.files.first?.remotePath,
-            "Adapter.safetensors"
+            "Watercolor-Anime.safetensors"
+        )
+        XCTAssertEqual(
+            watercolor.publicWeightsFilename,
+            "Watercolor-Anime.safetensors"
         )
     }
 

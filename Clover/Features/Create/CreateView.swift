@@ -31,7 +31,8 @@ struct CreateView: View {
             LazyVStack(spacing: 20) {
                 OutputCanvas(
                     artworks: store.latest,
-                    phase: store.phase
+                    phase: store.phase,
+                    outputRatio: store.settings.outputRatio
                 )
 
                 modelButton
@@ -94,8 +95,7 @@ struct CreateView: View {
             store.presentedSheet = .models
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "paintpalette.fill")
-                    .font(.title3)
+                modelIcon
                     .foregroundStyle(.cloverGreen)
                     .frame(width: 34, height: 34)
                     .background(.quaternary, in: .circle)
@@ -122,6 +122,19 @@ struct CreateView: View {
         .buttonStyle(.plain)
         .disabled(store.phase.isWorking)
         .accessibilityIdentifier("model-picker-button")
+    }
+
+    @ViewBuilder
+    private var modelIcon: some View {
+        if let variant = selectedVariant {
+            Image(variant.iconAssetName)
+                .resizable()
+                .scaledToFit()
+                .padding(7)
+        } else {
+            Image(systemName: "paintpalette.fill")
+                .font(.title3)
+        }
     }
 
     private var promptSection: some View {
