@@ -1,4 +1,5 @@
 import CoreML
+import StableDiffusion
 import XCTest
 @testable import Clover
 
@@ -171,12 +172,13 @@ final class GenerationSettingsTests: XCTestCase {
         )
     }
 
-    func testCatalogDecodesMultifunctionStyle() throws {
+    func testCatalogDecodesStatefulLoRAStyle() throws {
         let data = Data(
             """
             {
-              "schema_version": 2,
-              "catalog_version": "2.0.0",
+              "schema_version": 3,
+              "catalog_version": "3.0.0",
+              "architecture": "stateful-lora",
               "repository": "neonforestmist/Clover-Image-Tiny-CoreML",
               "minimum_ios": "18.0",
               "resolution": [512, 512],
@@ -193,12 +195,15 @@ final class GenerationSettingsTests: XCTestCase {
                 "trigger": "watercolor anime",
                 "source_lora": "neonforestmist/clover-image-tiny-watercolor-anime-lora",
                 "dataset": "neonforestmist/GPT_Watercolor_Anime_Style_Images",
-                "function_name": "watercolor_anime",
-                "repository": "neonforestmist/Clover-Image-Tiny-CoreML",
-                "revision": "sharedcommit",
-                "download_size": 0,
-                "style_model_size": 647757010,
-                "files": []
+                "repository": "neonforestmist/clover-image-tiny-watercolor-anime-lora",
+                "revision": "loracommit",
+                "download_size": 6927128,
+                "files": [{
+                  "path": "Adapter.safetensors",
+                  "remote_path": "pytorch_lora_weights.safetensors",
+                  "size": 6927128,
+                  "sha256": "37153c3084bf50c0355813c167da61612ed24695493c1d9479ecdb0e9cd958f2"
+                }]
               }]
             }
             """.utf8
@@ -209,10 +214,73 @@ final class GenerationSettingsTests: XCTestCase {
             catalog.variant(id: "watercolor-anime")
         )
 
-        XCTAssertEqual(catalog.schemaVersion, 2)
+        XCTAssertEqual(catalog.schemaVersion, 3)
+        XCTAssertEqual(catalog.architecture, "stateful-lora")
         XCTAssertEqual(watercolor.coreMLFunctionName, "watercolor_anime")
-        XCTAssertEqual(watercolor.downloadSize, 0)
-        XCTAssertEqual(watercolor.styleModelSize, 647_757_010)
+        XCTAssertEqual(watercolor.downloadSize, 6_927_128)
+        XCTAssertEqual(watercolor.files.first?.path, "Adapter.safetensors")
+    }
+
+    func testBootstrapStylesExposeExactLoRASize() {
+        XCTAssertEqual(
+            ModelCatalog.bootstrap.styleVariants.map(\.downloadSize),
+            [6_927_128, 6_927_128, 6_927_128]
+        )
+    }
+
+    func testLoRAAdapterParsesSafetensorsHeader() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(
+            path: UUID().uuidString,
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: folder,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let header = try JSONSerialization.data(withJSONObject: [
+            "lora.down.weight": [
+                "dtype": "F32",
+                "shape": [1],
+                "data_offsets": [0, 4],
+            ],
+        ])
+        var weights = Data()
+        var headerLength = UInt64(header.count).littleEndian
+        withUnsafeBytes(of: &headerLength) {
+            weights.append(contentsOf: $0)
+        }
+        weights.append(header)
+        var value = Float(0.5).bitPattern.littleEndian
+        withUnsafeBytes(of: &value) {
+            weights.append(contentsOf: $0)
+        }
+        let weightsURL = folder.appending(path: "Adapter.safetensors")
+        try weights.write(to: weightsURL)
+
+        let schema = Data(
+            """
+            {
+              "schema_version": 1,
+              "states": [{
+                "source_key": "lora.down.weight",
+                "state_name": "lora_down",
+                "shape": [1],
+                "element_count": 1
+              }]
+            }
+            """.utf8
+        )
+        let schemaURL = folder.appending(path: "adapter-schema.json")
+        try schema.write(to: schemaURL)
+
+        let adapter = try LoRAAdapter(
+            weightsAt: weightsURL,
+            schemaAt: schemaURL
+        )
+        XCTAssertEqual(adapter.fileSize, weights.count)
+        XCTAssertEqual(adapter.tensorCount, 1)
     }
 
     func testLocalMultifunctionModelFunctionsLoad() async throws {

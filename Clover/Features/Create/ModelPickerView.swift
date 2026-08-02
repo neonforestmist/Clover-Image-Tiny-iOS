@@ -126,7 +126,7 @@ struct ModelPickerView: View {
             } footer: {
                 Text(
                     manager.isBaseInstalled
-                        ? "Each style reuses Clover’s stored weights, so adding one doesn’t re-download the full model. Add a prompt trigger to apply it."
+                        ? "Each style is a separate 6.9 MB LoRA adapter that reuses the one-time Clover download. Include the trigger shown under the style in your prompt."
                         : "Install Clover above to unlock these styles."
                 )
             }
@@ -340,7 +340,7 @@ private struct ModelVariantRow: View {
     }
 
     private var formattedDownloadSize: String {
-        "≈\(downloadSize.formatted(.byteCount(style: .memory)))"
+        downloadSize.formatted(.byteCount(style: .file))
     }
 }
 

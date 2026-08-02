@@ -21,7 +21,7 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 - One to four images per generation
 - PNDM and DPM-Solver++ schedulers
 - NumPy and PyTorch-compatible random generators
-- Neural Engine, automatic, and GPU compute modes
+- Neural Engine, automatic, and GPU compute preferences
 - Local artwork library and Photos export
 - Base-first downloads: install Clover, then add only the styles you want
 - Import your own Core ML models from **On My iPhone → Clover → Imported Styles**
@@ -56,13 +56,13 @@ Downloaded files are visible in the Files app under
 migrated into that folder when possible.
 
 Clover installs first: its shared components (text encoder, VAE, safety
-checker, tokenizer) plus the base U-Net. The Monet, Pointillism, and Watercolor
-Anime styles are then **optional, individual downloads** — each ships only its
-own Core ML U-Net and reuses Clover's already-installed shared components, so a
-style is downloaded only if you choose it. Styles stay locked until Clover is
-installed. You can also side-load your own Core ML model by placing its folder
-in **On My iPhone → Clover → Imported Styles**; it appears in the picker
-automatically.
+checker, tokenizer) plus one stateful base U-Net, about 1.5 GB total. Monet,
+Pointillism, and Watercolor Anime are then **optional 6,927,128-byte LoRA
+downloads**. The Swift pipeline converts the selected adapter to FP16 and loads
+it into the U-Net's mutable Core ML state; it never downloads another ~648 MB
+U-Net. Styles stay locked until Clover is installed. You can also side-load
+your own Core ML model by placing its folder in **On My iPhone → Clover →
+Imported Styles**; it appears in the picker automatically.
 
 ## On-device behavior
 
@@ -70,10 +70,11 @@ After installation, prompts and generated images stay on the device. Network
 access is used to refresh the catalog and download model files from Hugging
 Face.
 
-A physical device can use the Apple Neural Engine, so validate real generation
-on an iPhone or iPad; the Simulator runs Core ML on CPU only and is much slower.
-The first generation may take longer while Core ML compiles and caches its
-graphs.
+The stateful U-Net runs with CPU and GPU compute because its mutable adapter
+buffers are not execution-planned reliably on the Neural Engine. Other pipeline
+components still honor the selected compute preference. Validate real
+generation on an iPhone or iPad; the Simulator is suitable for UI testing. The
+first generation may take longer while Core ML compiles and caches its graphs.
 
 ## Project structure
 
@@ -88,9 +89,9 @@ Clover/
 
 The app vendors the small Swift runtime from Apple's
 [`ml-stable-diffusion`](https://github.com/apple/ml-stable-diffusion) project.
-Its model loader is adapted to use `MLModelAsset`, which is required when
-selecting an iOS 18 multifunction model. Apple's license is retained in the
-vendored package.
+Its model loader is adapted to create an iOS 18 `MLState`, populate 144 mutable
+LoRA tensors from a standard Diffusers safetensors file, and keep that state for
+every denoising step. Apple's license is retained in the vendored package.
 
 ## Regenerate the Xcode project
 

@@ -19,6 +19,14 @@ public final class ManagedMLModel: ResourceManaging {
     /// The loaded model (when loaded)
     var loadedModel: MLModel?
 
+    /// Creates state for models that use iOS 18 mutable Core ML buffers. The
+    /// result is type-erased so this package can keep its iOS 16 deployment
+    /// target for non-stateful clients.
+    var makeLoadedState: ((MLModel) throws -> AnyObject?)?
+
+    /// State belongs to the currently loaded model and is rebuilt after unload.
+    var loadedState: AnyObject?
+
     /// Queue to protect access to loaded model
     var queue: DispatchQueue
 
@@ -28,11 +36,35 @@ public final class ManagedMLModel: ResourceManaging {
     ///     - url: The location of the model
     ///     - configuration: The configuration to be used when the model is loaded/used
     /// - Returns: A managed model that has not been loaded
-    public init(modelAt url: URL, configuration: MLModelConfiguration) {
+    public init(
+        modelAt url: URL,
+        configuration: MLModelConfiguration
+    ) {
         self.modelURL = url
         self.configuration = configuration
+        self.makeLoadedState = nil
         self.loadedModel = nil
+        self.loadedState = nil
         self.queue = DispatchQueue(label: "managed.\(url.lastPathComponent)")
+    }
+
+    /// Create a managed stateful model and optionally populate its LoRA state.
+    @available(iOS 18.0, macOS 15.0, *)
+    public convenience init(
+        modelAt url: URL,
+        configuration: MLModelConfiguration,
+        loraAdapter: LoRAAdapter?
+    ) {
+        self.init(modelAt: url, configuration: configuration)
+        makeLoadedState = { model in
+            guard !model.modelDescription
+                .stateDescriptionsByName.isEmpty else {
+                return nil
+            }
+            let state = model.makeState()
+            try loraAdapter?.populate(state)
+            return state
+        }
     }
 
     /// Instantiation and load model into memory
@@ -45,6 +77,7 @@ public final class ManagedMLModel: ResourceManaging {
     /// Unload the model if it was loaded
     public func unloadResources() {
         queue.sync {
+            loadedState = nil
             loadedModel = nil
         }
     }
@@ -62,6 +95,34 @@ public final class ManagedMLModel: ResourceManaging {
             try autoreleasepool {
                 try loadModel()
                 return try body(loadedModel!)
+            }
+        }
+    }
+
+    /// Predict a batch, using the model's persistent LoRA state when present.
+    func predictions(from batch: MLBatchProvider) throws -> MLBatchProvider {
+        try queue.sync {
+            try autoreleasepool {
+                try loadModel()
+                guard let model = loadedModel else {
+                    throw CocoaError(.fileReadUnknown)
+                }
+                if #available(
+                    iOS 18.0,
+                    macOS 15.0,
+                    tvOS 18.0,
+                    watchOS 11.0,
+                    *
+                ), let state = loadedState as? MLState {
+                    let outputs = try (0..<batch.count).map { index in
+                        try model.prediction(
+                            from: batch.features(at: index),
+                            using: state
+                        )
+                    }
+                    return MLArrayBatchProvider(array: outputs)
+                }
+                return try model.predictions(fromBatch: batch)
             }
         }
     }
@@ -108,6 +169,17 @@ public final class ManagedMLModel: ResourceManaging {
                     configuration: configuration
                 )
             }
+
+            if #available(
+                iOS 18.0,
+                macOS 15.0,
+                tvOS 18.0,
+                watchOS 11.0,
+                *
+            ), let model = loadedModel,
+               let makeLoadedState {
+                loadedState = try makeLoadedState(model)
+            }
         }
     }
 }
@@ -119,9 +191,7 @@ public extension Array where Element == ManagedMLModel {
     /// - Returns: Final prediction results after processing through all models.
     /// - Throws: Errors if the array is empty, predictions fail, or results can't be combined.
     func predictions(from batch: MLBatchProvider) throws -> MLBatchProvider {
-        var results = try self.first!.perform { model in
-            try model.predictions(fromBatch: batch)
-        }
+        var results = try self.first!.predictions(from: batch)
 
         if self.count == 1 {
             return results
@@ -139,9 +209,7 @@ public extension Array where Element == ManagedMLModel {
             let nextBatch = MLArrayBatchProvider(array: next)
 
             // Predict
-            results = try stage.perform { model in
-                try model.predictions(fromBatch: nextBatch)
-            }
+            results = try stage.predictions(from: nextBatch)
         }
 
         return results

@@ -24,6 +24,23 @@ public struct Unet: ResourceManaging {
         self.models = [ManagedMLModel(modelAt: url, configuration: configuration)]
     }
 
+    /// Creates an adapter-aware U-Net. The same stateful base model is used for
+    /// Clover and every style; only the small safetensors adapter changes.
+    @available(iOS 18.0, macOS 15.0, *)
+    public init(
+        modelAt url: URL,
+        configuration: MLModelConfiguration,
+        loraAdapter: LoRAAdapter?
+    ) {
+        self.models = [
+            ManagedMLModel(
+                modelAt: url,
+                configuration: configuration,
+                loraAdapter: loraAdapter
+            )
+        ]
+    }
+
     /// Creates a U-Net noise prediction model
     ///
     /// - Parameters:

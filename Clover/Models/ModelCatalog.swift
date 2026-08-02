@@ -40,9 +40,6 @@ struct ModelCatalog: Codable, Equatable, Sendable {
         let repository: String?
         let revision: String
         let downloadSize: Int64
-        /// The full fused U-Net size for a style, before it shares Clover's base weights.
-        /// This is display metadata, not an additional download requirement.
-        let styleModelSize: Int64?
         let files: [ResourceFile]
 
         enum CodingKeys: String, CodingKey {
@@ -56,7 +53,6 @@ struct ModelCatalog: Codable, Equatable, Sendable {
             case repository
             case revision
             case downloadSize = "download_size"
-            case styleModelSize = "style_model_size"
             case files
         }
 
@@ -68,6 +64,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
 
     let schemaVersion: Int
     let catalogVersion: String
+    let architecture: String?
     let repository: String
     let minimumIOS: String
     let resolution: [Int]
@@ -77,6 +74,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case catalogVersion = "catalog_version"
+        case architecture
         case repository
         case minimumIOS = "minimum_ios"
         case resolution
@@ -92,15 +90,16 @@ struct ModelCatalog: Codable, Equatable, Sendable {
     // triggers mirror the live per-style catalog; `files` are intentionally
     // empty so downloads wait for the verified manifest fetched on appear.
     static let bootstrap = ModelCatalog(
-        schemaVersion: 2,
+        schemaVersion: 3,
         catalogVersion: "loading",
+        architecture: "stateful-lora",
         repository: "neonforestmist/Clover-Image-Tiny-CoreML",
         minimumIOS: "18.0",
         resolution: [512, 512],
         common: ResourceGroup(
             repository: nil,
             revision: "",
-            downloadSize: 955_481_353,
+            downloadSize: 1_603_231_070,
             files: []
         ),
         variants: [
@@ -114,8 +113,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 functionName: nil,
                 repository: nil,
                 revision: "",
-                downloadSize: 647_756_972,
-                styleModelSize: nil,
+                downloadSize: 0,
                 files: []
             ),
             Variant(
@@ -126,10 +124,9 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 sourceLoRA: "neonforestmist/clover-image-tiny-monet-lora",
                 dataset: "neonforestmist/GPT_Monet_Style_Images",
                 functionName: nil,
-                repository: "neonforestmist/clover-image-tiny-monet-lora-coreml",
+                repository: "neonforestmist/clover-image-tiny-monet-lora",
                 revision: "",
-                downloadSize: 647_756_986,
-                styleModelSize: 647_756_986,
+                downloadSize: 6_927_128,
                 files: []
             ),
             Variant(
@@ -140,10 +137,9 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 sourceLoRA: "neonforestmist/clover-image-tiny-pointillism-lora",
                 dataset: "neonforestmist/GPT_Pointillism_Style_Images",
                 functionName: nil,
-                repository: "neonforestmist/clover-image-tiny-pointillism-lora-coreml",
+                repository: "neonforestmist/clover-image-tiny-pointillism-lora",
                 revision: "",
-                downloadSize: 647_756_998,
-                styleModelSize: 647_756_998,
+                downloadSize: 6_927_128,
                 files: []
             ),
             Variant(
@@ -154,10 +150,9 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 sourceLoRA: "neonforestmist/clover-image-tiny-watercolor-anime-lora",
                 dataset: "neonforestmist/GPT_Watercolor_Anime_Style_Images",
                 functionName: nil,
-                repository: "neonforestmist/clover-image-tiny-watercolor-anime-lora-coreml",
+                repository: "neonforestmist/clover-image-tiny-watercolor-anime-lora",
                 revision: "",
-                downloadSize: 647_756_998,
-                styleModelSize: 647_756_998,
+                downloadSize: 6_927_128,
                 files: []
             )
         ]

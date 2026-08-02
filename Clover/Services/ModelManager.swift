@@ -48,7 +48,7 @@ final class ModelManager {
                 throw ModelDownloadError.invalidResponse
             }
             let remote = try JSONDecoder().decode(ModelCatalog.self, from: data)
-            guard 1...2 ~= remote.schemaVersion else {
+            guard 1...3 ~= remote.schemaVersion else {
                 throw ModelDownloadError.invalidResponse
             }
             catalog = remote
@@ -198,9 +198,40 @@ final class ModelManager {
 
     private func refreshInstallStates() {
         for variant in catalog.variants where downloadTasks[variant.id] == nil {
-            states[variant.id] = ModelStorage.resourcesURL(for: variant.id) == nil
-                ? .notInstalled
-                : .installed
+            if catalog.schemaVersion >= 3 {
+                let resourcesURL = ModelStorage.installationURL(
+                    id: variant.id,
+                    revision: variant.revision
+                ).appending(
+                    path: "Resources",
+                    directoryHint: .isDirectory
+                )
+                let hasAdapter = FileManager.default.fileExists(
+                    atPath: resourcesURL.appending(
+                        path: "Adapter.safetensors"
+                    ).path
+                )
+                let isCurrent = !variant.revision.isEmpty
+                    && ModelStorage.isStatefulLoRAResourcesDirectory(
+                        resourcesURL
+                    )
+                    && (variant.id == Self.baseID || hasAdapter)
+                if isCurrent {
+                    ModelStorage.recordInstallation(
+                        id: variant.id,
+                        resourcesURL: resourcesURL
+                    )
+                } else {
+                    ModelStorage.clearInstallation(id: variant.id)
+                }
+                states[variant.id] = isCurrent
+                    ? .installed
+                    : .notInstalled
+            } else {
+                states[variant.id] = ModelStorage.resourcesURL(
+                    for: variant.id
+                ) == nil ? .notInstalled : .installed
+            }
         }
     }
 

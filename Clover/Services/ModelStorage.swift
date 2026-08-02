@@ -250,18 +250,38 @@ enum ModelStorage {
     static func isUsableResourcesDirectory(_ url: URL) -> Bool {
         let required = [
             "TextEncoder.mlmodelc",
-            "UnetChunk1.mlmodelc",
-            "UnetChunk2.mlmodelc",
             "VAEDecoder.mlmodelc",
             "SafetyChecker.mlmodelc",
             "vocab.json",
             "merges.txt",
         ]
-        return required.allSatisfy {
+        let hasRequiredResources = required.allSatisfy {
             FileManager.default.fileExists(
                 atPath: url.appending(path: $0).path
             )
         }
+        let hasSingleUNet = FileManager.default.fileExists(
+            atPath: url.appending(path: "Unet.mlmodelc").path
+        )
+        let hasChunkedUNet = [
+            "UnetChunk1.mlmodelc",
+            "UnetChunk2.mlmodelc",
+        ].allSatisfy {
+            FileManager.default.fileExists(
+                atPath: url.appending(path: $0).path
+            )
+        }
+        return hasRequiredResources && (hasSingleUNet || hasChunkedUNet)
+    }
+
+    static func isStatefulLoRAResourcesDirectory(_ url: URL) -> Bool {
+        isUsableResourcesDirectory(url)
+            && FileManager.default.fileExists(
+                atPath: url.appending(path: "Unet.mlmodelc").path
+            )
+            && FileManager.default.fileExists(
+                atPath: url.appending(path: "adapter-schema.json").path
+            )
     }
 
     static func isMultifunctionResourcesDirectory(_ url: URL) -> Bool {
