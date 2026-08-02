@@ -54,13 +54,43 @@ struct GenerationSettingsSheet: View {
                     )
                     .accessibilityIdentifier("image-count-stepper")
 
-                    Picker("Output crop", selection: $settings.outputRatio) {
+                    Picker("Aspect Ratio", selection: $settings.outputRatio) {
                         ForEach(GenerationSettings.OutputRatio.allCases) { ratio in
-                            Text("\(ratio.title) · \(ratio.dimensions)")
+                            Label {
+                                Text(ratio == .custom
+                                    ? ratio.title
+                                    : "\(ratio.title) · \(ratio.dimensions)")
+                            } icon: {
+                                Image(systemName: ratio.systemImage)
+                            }
                                 .tag(ratio)
                         }
                     }
                     .accessibilityIdentifier("output-ratio-picker")
+
+                    if settings.outputRatio == .custom {
+                        Stepper(
+                            value: $settings.customAspectWidth,
+                            in: 1...32
+                        ) {
+                            Label(
+                                "Width · \(settings.customAspectWidth)",
+                                systemImage: "arrow.left.and.right"
+                            )
+                        }
+                        .accessibilityIdentifier("custom-ratio-width-stepper")
+
+                        Stepper(
+                            value: $settings.customAspectHeight,
+                            in: 1...32
+                        ) {
+                            Label(
+                                "Height · \(settings.customAspectHeight)",
+                                systemImage: "arrow.up.and.down"
+                            )
+                        }
+                        .accessibilityIdentifier("custom-ratio-height-stepper")
+                    }
                 } header: {
                     Text("Generation")
                 } footer: {
@@ -121,7 +151,7 @@ struct GenerationSettingsSheet: View {
                 Section {
                     LabeledContent(
                         "Output",
-                        value: settings.outputRatio.dimensions
+                        value: settings.outputDimensions
                     )
                     LabeledContent("Generation", value: "512 × 512")
                     LabeledContent("Model", value: settings.modelID.capitalized)

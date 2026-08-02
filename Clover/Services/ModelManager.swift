@@ -15,8 +15,8 @@ final class ModelManager {
 
     private(set) var catalog: ModelCatalog
     private(set) var states: [String: InstallState] = [:]
-    /// Core ML models the user side-loaded through the Files app.
-    private(set) var imported: [ModelStorage.ImportedModel] = []
+    /// LoRA files and legacy Core ML models side-loaded through Files.
+    private(set) var imported: [ModelStorage.ImportedStyle] = []
     private(set) var isRefreshing = false
     var errorMessage: String?
 
@@ -63,7 +63,7 @@ final class ModelManager {
 
     /// Re-scan the Files import folder. Cheap; safe to call when the picker appears.
     func refreshImported() {
-        imported = ModelStorage.importedModels()
+        imported = ModelStorage.importedStyles()
     }
 
     func state(for id: String) -> InstallState {
@@ -101,13 +101,13 @@ final class ModelManager {
         catalog.variant(id: id)
     }
 
-    func importedModel(id: String) -> ModelStorage.ImportedModel? {
+    func importedStyle(id: String) -> ModelStorage.ImportedStyle? {
         imported.first { $0.id == id }
     }
 
     /// A friendly name for any selectable model, including imported ones.
     func displayName(for id: String) -> String? {
-        variant(id: id)?.name ?? importedModel(id: id)?.name
+        variant(id: id)?.name ?? importedStyle(id: id)?.name
     }
 
     func download(_ variant: ModelCatalog.Variant) {

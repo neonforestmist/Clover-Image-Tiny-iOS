@@ -49,6 +49,8 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertEqual(snapshot.imageIndex, 2)
         XCTAssertEqual(snapshot.modelID, "base")
         XCTAssertEqual(snapshot.outputRatio, .square)
+        XCTAssertEqual(snapshot.customAspectWidth, 3)
+        XCTAssertEqual(snapshot.customAspectHeight, 2)
     }
 
     func testPromptTrimming() {
@@ -82,22 +84,59 @@ final class GenerationSettingsTests: XCTestCase {
 
         XCTAssertEqual(settings.modelID, "base")
         XCTAssertEqual(settings.outputRatio, .square)
+        XCTAssertEqual(settings.customAspectWidth, 3)
+        XCTAssertEqual(settings.customAspectHeight, 2)
     }
 
     func testOutputRatiosCropA512SquareWithoutResizing() {
         let source = CGSize(width: 512, height: 512)
+        var settings = GenerationSettings()
 
         XCTAssertEqual(
-            GenerationSettings.OutputRatio.square.croppedSize(from: source),
+            settings.croppedSize(from: source),
             CGSize(width: 512, height: 512)
         )
+
+        settings.outputRatio = .portrait
         XCTAssertEqual(
-            GenerationSettings.OutputRatio.portrait.croppedSize(from: source),
+            settings.croppedSize(from: source),
             CGSize(width: 410, height: 512)
         )
+
+        settings.outputRatio = .cinematic
         XCTAssertEqual(
-            GenerationSettings.OutputRatio.cinematic.croppedSize(from: source),
+            settings.croppedSize(from: source),
             CGSize(width: 512, height: 288)
+        )
+
+        settings.outputRatio = .custom
+        settings.customAspectWidth = 3
+        settings.customAspectHeight = 2
+        XCTAssertEqual(settings.outputDimensions, "3:2")
+        XCTAssertEqual(
+            settings.croppedSize(from: source),
+            CGSize(width: 512, height: 341)
+        )
+    }
+
+    func testImportedStylesDetectStandaloneSafetensors() throws {
+        let filename = "Codex Test \(UUID().uuidString).safetensors"
+        let url = ModelStorage.importedRootURL.appending(path: filename)
+        try Data(repeating: 0, count: 9).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let style = try XCTUnwrap(
+            ModelStorage.importedStyles().first {
+                $0.weightsURL?.standardizedFileURL == url.standardizedFileURL
+            }
+        )
+
+        XCTAssertEqual(style.name, url.deletingPathExtension().lastPathComponent)
+        XCTAssertEqual(style.fileSize, 9)
+        XCTAssertTrue(style.requiresClover)
+        XCTAssertEqual(
+            ModelStorage.importedWeightsURL(for: style.id)?.standardizedFileURL,
+            url.standardizedFileURL
         )
     }
 
@@ -287,7 +326,7 @@ final class GenerationSettingsTests: XCTestCase {
         withUnsafeBytes(of: &value) {
             weights.append(contentsOf: $0)
         }
-        let weightsURL = folder.appending(path: "Adapter.safetensors")
+        let weightsURL = folder.appending(path: "My Custom Style.safetensors")
         try weights.write(to: weightsURL)
 
         let schema = Data(

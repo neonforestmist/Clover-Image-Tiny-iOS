@@ -32,7 +32,7 @@ struct CreateView: View {
                 OutputCanvas(
                     artworks: store.latest,
                     phase: store.phase,
-                    outputRatio: store.settings.outputRatio
+                    outputAspectRatio: store.settings.outputWidthOverHeight
                 )
 
                 modelButton

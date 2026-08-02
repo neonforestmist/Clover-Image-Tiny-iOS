@@ -113,6 +113,9 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
             let newPipeline = try CloverPipelineFactory.make(
                 resourcesURL: resourcesURL,
                 modelID: settings.modelID,
+                styleWeightsURL: ModelStorage.importedWeightsURL(
+                    for: settings.modelID
+                ),
                 configuration: configuration
             )
             try newPipeline.loadResources()
@@ -150,7 +153,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
         }
 
         let safeImages = images.compactMap { $0 }.compactMap {
-            $0.cropped(to: settings.outputRatio)
+            $0.cropped(using: settings)
         }.map(GeneratedImage.init)
         guard !safeImages.isEmpty else {
             throw GenerationError.noSafeImages
@@ -177,7 +180,7 @@ final class PreviewGenerationService: ImageGenerating, @unchecked Sendable {
         guard let image = UIImage(named: "SampleOutput")?.cgImage else {
             throw GenerationError.missingResources
         }
-        guard let cropped = image.cropped(to: settings.outputRatio) else {
+        guard let cropped = image.cropped(using: settings) else {
             throw GenerationError.missingResources
         }
         return (0..<settings.imageCount).map { _ in
@@ -188,10 +191,10 @@ final class PreviewGenerationService: ImageGenerating, @unchecked Sendable {
 
 extension CGImage {
     func cropped(
-        to outputRatio: GenerationSettings.OutputRatio
+        using settings: GenerationSettings
     ) -> CGImage? {
         let source = CGSize(width: width, height: height)
-        let target = outputRatio.croppedSize(from: source)
+        let target = settings.croppedSize(from: source)
         let rect = CGRect(
             x: ((source.width - target.width) / 2).rounded(.down),
             y: ((source.height - target.height) / 2).rounded(.down),

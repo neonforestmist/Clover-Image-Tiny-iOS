@@ -7,11 +7,38 @@ enum ModelStorage {
     /// than one downloaded from the catalog.
     static let importedIDPrefix = "imported:"
 
-    /// A Core ML model the user placed in On My iPhone › Clover › Imported Styles.
-    struct ImportedModel: Identifiable, Equatable, Sendable {
+    /// A style the user placed in On My iPhone › Clover › Imported Styles.
+    struct ImportedStyle: Identifiable, Equatable, Sendable {
+        enum Source: Equatable, Sendable {
+            case safetensors(URL)
+            case coreMLResources(URL)
+        }
+
         let id: String
         let name: String
-        let resourcesURL: URL
+        let source: Source
+        let fileSize: Int64?
+
+        var weightsURL: URL? {
+            guard case let .safetensors(url) = source else { return nil }
+            return url
+        }
+
+        var resourcesURL: URL? {
+            guard case let .coreMLResources(url) = source else { return nil }
+            return url
+        }
+
+        var requiresClover: Bool {
+            weightsURL != nil
+        }
+
+        var detail: String {
+            if let fileSize {
+                return "Clover LoRA · \(fileSize.formatted(.byteCount(style: .file)))"
+            }
+            return "Legacy Core ML model"
+        }
     }
 
     static let rootURL: URL = {
@@ -120,40 +147,65 @@ enum ModelStorage {
         return url
     }
 
-    /// Every valid Core ML model the user has dropped into the import folder.
-    /// A folder counts if it is itself a usable resources directory or directly
-    /// contains exactly one usable resources directory (e.g. an unzipped
-    /// `Resources` folder from the Core ML conversion tooling).
-    static func importedModels() -> [ImportedModel] {
+    /// Every supported style in the import folder. A standalone safetensors
+    /// file is loaded into Clover's shared stateful U-Net. Full Core ML folders
+    /// remain supported for compatibility with older app releases.
+    static func importedStyles() -> [ImportedStyle] {
         let root = importedRootURL
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: root,
-            includingPropertiesForKeys: [.isDirectoryKey],
+            includingPropertiesForKeys: [
+                .isDirectoryKey,
+                .isRegularFileKey,
+                .fileSizeKey,
+            ],
             options: [.skipsHiddenFiles]
         ) else {
             return []
         }
 
-        var models: [ImportedModel] = []
+        var styles: [ImportedStyle] = []
         for entry in entries {
-            guard (try? entry.resourceValues(
-                forKeys: [.isDirectoryKey]
-            ).isDirectory) == true else {
+            guard let values = try? entry.resourceValues(forKeys: [
+                .isDirectoryKey,
+                .isRegularFileKey,
+                .fileSizeKey,
+            ]) else {
                 continue
             }
-            guard let resources = resolveImportedResources(entry) else {
-                continue
-            }
-            let name = entry.deletingPathExtension().lastPathComponent
-            models.append(
-                ImportedModel(
-                    id: importedIDPrefix + name,
-                    name: name,
-                    resourcesURL: resources
+
+            if values.isRegularFile == true,
+               entry.pathExtension.lowercased() == "safetensors",
+               let fileSize = values.fileSize,
+               fileSize > 8 {
+                let filename = entry.lastPathComponent
+                styles.append(
+                    ImportedStyle(
+                        id: importedIDPrefix
+                            + "weights:"
+                            + filename.lowercased(),
+                        name: entry.deletingPathExtension().lastPathComponent,
+                        source: .safetensors(entry),
+                        fileSize: Int64(fileSize)
+                    )
                 )
-            )
+                continue
+            }
+
+            if values.isDirectory == true,
+               let resources = resolveImportedResources(entry) {
+                let name = entry.deletingPathExtension().lastPathComponent
+                styles.append(
+                    ImportedStyle(
+                        id: importedIDPrefix + name,
+                        name: name,
+                        source: .coreMLResources(resources),
+                        fileSize: nil
+                    )
+                )
+            }
         }
-        return models.sorted {
+        return styles.sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
     }
@@ -200,7 +252,12 @@ enum ModelStorage {
 
     static func resourcesURL(for id: String) -> URL? {
         if id.hasPrefix(importedIDPrefix) {
-            return importedModels().first { $0.id == id }?.resourcesURL
+            guard let style = importedStyles().first(where: {
+                $0.id == id
+            }) else {
+                return nil
+            }
+            return style.resourcesURL ?? resourcesURL(for: "base")
         }
 
         if let stored = UserDefaults.standard.string(
@@ -222,6 +279,11 @@ enum ModelStorage {
             return bundleURL
         }
         return nil
+    }
+
+    static func importedWeightsURL(for id: String) -> URL? {
+        guard id.hasPrefix(importedIDPrefix) else { return nil }
+        return importedStyles().first { $0.id == id }?.weightsURL
     }
 
     static func recordInstallation(id: String, resourcesURL: URL) {

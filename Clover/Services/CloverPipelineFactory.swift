@@ -2,6 +2,17 @@ import CoreML
 import Foundation
 import StableDiffusion
 
+enum CloverPipelineError: LocalizedError {
+    case importedStyleRequiresStatefulClover
+
+    var errorDescription: String? {
+        switch self {
+        case .importedStyleRequiresStatefulClover:
+            "Imported .safetensors styles require the current Clover model."
+        }
+    }
+}
+
 enum CloverPipelineFactory {
     private struct FunctionManifest: Decodable {
         let functions: [String: String]
@@ -14,6 +25,7 @@ enum CloverPipelineFactory {
     static func make(
         resourcesURL: URL,
         modelID: String,
+        styleWeightsURL: URL? = nil,
         configuration: MLModelConfiguration
     ) throws -> StableDiffusionPipeline {
         let urls = StableDiffusionPipeline.ResourceURLs(
@@ -24,7 +36,7 @@ enum CloverPipelineFactory {
         )
         if FileManager.default.fileExists(atPath: urls.unetURL.path),
            FileManager.default.fileExists(atPath: adapterSchemaURL.path) {
-            let adapterURL = resourcesURL.appending(
+            let adapterURL = styleWeightsURL ?? resourcesURL.appending(
                 path: "Adapter.safetensors"
             )
             let adapter = FileManager.default.fileExists(
@@ -39,6 +51,10 @@ enum CloverPipelineFactory {
                 adapter: adapter,
                 configuration: configuration
             )
+        }
+
+        if styleWeightsURL != nil {
+            throw CloverPipelineError.importedStyleRequiresStatefulClover
         }
 
         let functionManifestURL = resourcesURL.appending(

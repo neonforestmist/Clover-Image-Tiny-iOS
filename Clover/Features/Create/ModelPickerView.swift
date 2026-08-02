@@ -141,9 +141,9 @@ struct ModelPickerView: View {
             if manager.imported.isEmpty {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("No imported models yet")
+                        Text("No imported styles yet")
                             .font(.subheadline)
-                        Text("Add your own below.")
+                        Text("Add a .safetensors file in Files.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -153,11 +153,13 @@ struct ModelPickerView: View {
                 }
                 .accessibilityElement(children: .combine)
             } else {
-                ForEach(manager.imported) { model in
-                    ImportedModelRow(
-                        model: model,
-                        isSelected: settings.modelID == model.id,
-                        select: { select(model.id) }
+                ForEach(manager.imported) { style in
+                    ImportedStyleRow(
+                        style: style,
+                        isSelected: settings.modelID == style.id,
+                        isLocked: style.requiresClover
+                            && !manager.isBaseInstalled,
+                        select: { select(style.id) }
                     )
                 }
             }
@@ -172,7 +174,7 @@ struct ModelPickerView: View {
             Text("Imported Styles")
         } footer: {
             Text(
-                "Bring your own Core ML model: in the Files app, open On My iPhone › Clover › Imported Styles and drop the model’s folder inside. It appears here automatically — no base model required."
+                "Drop a Clover-compatible .safetensors file into On My iPhone › Clover › Imported Styles. The app detects the file and loads it into the installed Clover model. Legacy full Core ML folders still work."
             )
         }
     }
@@ -347,47 +349,63 @@ private struct ModelVariantRow: View {
     }
 }
 
-// MARK: - Imported model row
+// MARK: - Imported style row
 
-private struct ImportedModelRow: View {
-    let model: ModelStorage.ImportedModel
+private struct ImportedStyleRow: View {
+    let style: ModelStorage.ImportedStyle
     let isSelected: Bool
+    let isLocked: Bool
     let select: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "square.and.arrow.down.on.square.fill")
+            Image(systemName: style.requiresClover
+                ? "paintbrush.pointed.fill"
+                : "square.and.arrow.down.on.square.fill")
                 .font(.title3)
-                .foregroundStyle(.cloverGreen)
+                .foregroundStyle(
+                    isLocked
+                        ? AnyShapeStyle(.secondary)
+                        : AnyShapeStyle(.cloverGreen)
+                )
                 .frame(width: 30, height: 30)
                 .background(.quaternary, in: .circle)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(model.name)
+                Text(style.name)
                     .font(.headline)
-                Text("Imported from Files")
+                    .foregroundStyle(isLocked ? .secondary : .primary)
+                Text(style.detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 8)
 
-            if isSelected {
+            if isLocked {
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(.tertiary)
+                    .accessibilityLabel(
+                        "\(style.name) requires Clover"
+                    )
+            } else if isSelected {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.title3)
                     .foregroundStyle(.cloverGreen)
-                    .accessibilityLabel("\(model.name), selected")
+                    .accessibilityLabel("\(style.name), selected")
             } else {
                 Button("Use", action: select)
                     .buttonStyle(.borderless)
-                    .accessibilityLabel("Use \(model.name)")
+                    .accessibilityLabel("Use \(style.name)")
             }
         }
         .padding(.vertical, 4)
         .contentShape(.rect)
-        .onTapGesture { if !isSelected { select() } }
+        .onTapGesture {
+            if !isSelected, !isLocked { select() }
+        }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("imported-\(model.name)")
+        .accessibilityIdentifier("imported-\(style.name)")
     }
 }
 

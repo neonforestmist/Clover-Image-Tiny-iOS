@@ -7,6 +7,7 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         case landscape
         case story
         case cinematic
+        case custom
 
         var id: Self { self }
 
@@ -17,6 +18,7 @@ struct GenerationSettings: Codable, Equatable, Sendable {
             case .landscape: "Landscape"
             case .story: "Story"
             case .cinematic: "Cinematic"
+            case .custom: "Custom"
             }
         }
 
@@ -27,32 +29,19 @@ struct GenerationSettings: Codable, Equatable, Sendable {
             case .landscape: "5:4"
             case .story: "9:16"
             case .cinematic: "16:9"
+            case .custom: "Custom"
             }
         }
 
-        var widthOverHeight: CGFloat {
+        var systemImage: String {
             switch self {
-            case .square: 1
-            case .portrait: 4.0 / 5.0
-            case .landscape: 5.0 / 4.0
-            case .story: 9.0 / 16.0
-            case .cinematic: 16.0 / 9.0
+            case .square: "square"
+            case .portrait: "rectangle.portrait"
+            case .landscape: "rectangle"
+            case .story: "iphone"
+            case .cinematic: "rectangle.compress.vertical"
+            case .custom: "aspectratio"
             }
-        }
-
-        func croppedSize(from size: CGSize) -> CGSize {
-            let sourceRatio = size.width / size.height
-            let targetRatio = widthOverHeight
-            if targetRatio < sourceRatio {
-                return CGSize(
-                    width: (size.height * targetRatio).rounded(),
-                    height: size.height
-                )
-            }
-            return CGSize(
-                width: size.width,
-                height: (size.width / targetRatio).rounded()
-            )
         }
     }
 
@@ -126,6 +115,8 @@ struct GenerationSettings: Codable, Equatable, Sendable {
     var computeTarget = ComputeTarget.neuralEngine
     var modelID = "base"
     var outputRatio = OutputRatio.square
+    var customAspectWidth = 3
+    var customAspectHeight = 2
 
     static let defaultsKey = "generation-settings"
 
@@ -141,6 +132,8 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         case computeTarget
         case modelID
         case outputRatio
+        case customAspectWidth
+        case customAspectHeight
     }
 
     init() {}
@@ -192,6 +185,14 @@ struct GenerationSettings: Codable, Equatable, Sendable {
             OutputRatio.self,
             forKey: .outputRatio
         ) ?? defaults.outputRatio
+        customAspectWidth = try container.decodeIfPresent(
+            Int.self,
+            forKey: .customAspectWidth
+        ) ?? defaults.customAspectWidth
+        customAspectHeight = try container.decodeIfPresent(
+            Int.self,
+            forKey: .customAspectHeight
+        ) ?? defaults.customAspectHeight
     }
 
     static func restored() -> Self {
@@ -216,6 +217,46 @@ struct GenerationSettings: Codable, Equatable, Sendable {
     var trimmedPrompt: String {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    var outputDimensions: String {
+        guard outputRatio == .custom else { return outputRatio.dimensions }
+        return "\(safeCustomAspectWidth):\(safeCustomAspectHeight)"
+    }
+
+    var outputWidthOverHeight: CGFloat {
+        switch outputRatio {
+        case .square: 1
+        case .portrait: 4.0 / 5.0
+        case .landscape: 5.0 / 4.0
+        case .story: 9.0 / 16.0
+        case .cinematic: 16.0 / 9.0
+        case .custom:
+            CGFloat(safeCustomAspectWidth) / CGFloat(safeCustomAspectHeight)
+        }
+    }
+
+    func croppedSize(from size: CGSize) -> CGSize {
+        let sourceRatio = size.width / size.height
+        let targetRatio = outputWidthOverHeight
+        if targetRatio < sourceRatio {
+            return CGSize(
+                width: (size.height * targetRatio).rounded(),
+                height: size.height
+            )
+        }
+        return CGSize(
+            width: size.width,
+            height: (size.width / targetRatio).rounded()
+        )
+    }
+
+    private var safeCustomAspectWidth: Int {
+        min(max(customAspectWidth, 1), 32)
+    }
+
+    private var safeCustomAspectHeight: Int {
+        min(max(customAspectHeight, 1), 32)
+    }
 }
 
 struct GenerationSnapshot: Codable, Equatable, Sendable {
@@ -230,6 +271,8 @@ struct GenerationSnapshot: Codable, Equatable, Sendable {
     let computeTarget: GenerationSettings.ComputeTarget
     let modelID: String?
     let outputRatio: GenerationSettings.OutputRatio?
+    let customAspectWidth: Int?
+    let customAspectHeight: Int?
 
     init(settings: GenerationSettings, imageIndex: Int) {
         prompt = settings.trimmedPrompt
@@ -243,5 +286,7 @@ struct GenerationSnapshot: Codable, Equatable, Sendable {
         computeTarget = settings.computeTarget
         modelID = settings.modelID
         outputRatio = settings.outputRatio
+        customAspectWidth = settings.customAspectWidth
+        customAspectHeight = settings.customAspectHeight
     }
 }

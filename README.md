@@ -19,12 +19,13 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 - Guidance from 1.0–20.0
 - Reproducible seeds with seed randomization
 - One to four images per generation
+- Aspect-ratio presets with SF Symbols plus a custom width:height crop
 - PNDM and DPM-Solver++ schedulers
 - NumPy and PyTorch-compatible random generators
 - Neural Engine, automatic, and GPU compute preferences
 - Local artwork library and Photos export
 - Base-first downloads: install Clover, then add only the styles you want
-- Import your own Core ML models from **On My iPhone → Clover → Imported Styles**
+- Import a Clover-compatible `.safetensors` style from **On My iPhone → Clover → Imported Styles**
 - Visible downloads in **On My iPhone → Clover → Models**
 - Immutable model revisions with byte-count and SHA-256 verification
 
@@ -64,12 +65,14 @@ weights to FP16 and loads them into the U-Net's mutable Core ML state; it never
 downloads another ~648 MB U-Net. Each style comes from its compact
 `-lora-coreml` Hugging Face repo, which contains only the named style weights,
 state mapping, model card, and license. Styles stay locked until Clover is
-installed. You can also side-load your own Core ML model by placing its folder
-in **On My iPhone → Clover → Imported Styles**; it appears in the picker
-automatically.
+installed. You can also side-load a Clover-compatible LoRA by placing its
+`.safetensors` file directly in **On My iPhone → Clover → Imported Styles**.
+The app detects the filename and loads its tensors into the installed Clover
+U-Net. Older full Core ML model folders remain supported.
 
 Output generation remains 512 × 512. The app can save centered 1:1, 4:5, 5:4,
-9:16, and 16:9 crops without downloading additional U-Net variants.
+9:16, 16:9, and custom width:height crops without downloading additional U-Net
+variants.
 
 ## On-device behavior
 
