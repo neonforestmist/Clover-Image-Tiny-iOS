@@ -4,6 +4,25 @@
 import Foundation
 import CoreML
 
+/// Errors raised when a U-Net model does not expose the inputs required by a
+/// Stable Diffusion pipeline.
+public enum UnetModelError: LocalizedError {
+    case missingModel
+    case missingInput(String)
+    case missingShape(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingModel:
+            "The U-Net model is missing."
+        case .missingInput(let name):
+            "The U-Net model does not contain the required \(name) input."
+        case .missingShape(let name):
+            "The U-Net model does not provide a shape for its \(name) input."
+        }
+    }
+}
+
 /// U-Net noise prediction model for stable diffusion
 @available(iOS 16.2, macOS 13.1, *)
 public struct Unet: ResourceManaging {
@@ -75,26 +94,30 @@ public struct Unet: ResourceManaging {
         }
     }
 
-    var latentSampleDescription: MLFeatureDescription {
-        try! models.first!.perform { model in
-            model.modelDescription.inputDescriptionsByName["sample"]!
-        }
-    }
-
     /// The expected shape of the models latent sample input
-    public var latentSampleShape: [Int] {
-        latentSampleDescription.multiArrayConstraint!.shape.map { $0.intValue }
-    }
-
-    var latentTimeIdDescription: MLFeatureDescription {
-        try! models.first!.perform { model in
-            model.modelDescription.inputDescriptionsByName["time_ids"]!
-        }
+    public func latentSampleShape() throws -> [Int] {
+        try inputShape(named: "sample")
     }
 
     /// The expected shape of the geometry conditioning
-    public var latentTimeIdShape: [Int] {
-        latentTimeIdDescription.multiArrayConstraint!.shape.map { $0.intValue }
+    public func latentTimeIdShape() throws -> [Int] {
+        try inputShape(named: "time_ids")
+    }
+
+    private func inputShape(named inputName: String) throws -> [Int] {
+        guard let model = models.first else {
+            throw UnetModelError.missingModel
+        }
+        return try model.perform { loadedModel in
+            guard let description = loadedModel.modelDescription
+                .inputDescriptionsByName[inputName] else {
+                throw UnetModelError.missingInput(inputName)
+            }
+            guard let constraint = description.multiArrayConstraint else {
+                throw UnetModelError.missingShape(inputName)
+            }
+            return constraint.shape.map(\.intValue)
+        }
     }
 
     /// Batch prediction noise from latent samples

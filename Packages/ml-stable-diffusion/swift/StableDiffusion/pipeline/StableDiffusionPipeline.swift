@@ -238,8 +238,14 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
             }
         }
 
+        let latentSampleShape = try unet.latentSampleShape()
+
         // Generate random latent samples from specified seed
-        var latents: [MLShapedArray<Float32>] = try generateLatentSamples(configuration: config, scheduler: scheduler[0])
+        var latents: [MLShapedArray<Float32>] = try generateLatentSamples(
+            configuration: config,
+            scheduler: scheduler[0],
+            sampleShape: latentSampleShape
+        )
 
         // Store denoised latents from scheduler to pass into decoder
         var denoisedLatents: [MLShapedArray<Float32>] = latents.map { MLShapedArray(converting: $0) }
@@ -284,7 +290,7 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
             // Predict noise residuals from latent samples
             // and current time step conditioned on hidden states
             var noise : [MLShapedArray<Float32>]
-            if unet.latentSampleShape[0] >= 2 || config.guidanceScale < 1.0 {
+            if latentSampleShape[0] >= 2 || config.guidanceScale < 1.0 {
                 // One predict call from the uNet, using batching if needed
                 noise = try unet.predictNoise(
                   latents: latentUnetInput,
@@ -358,8 +364,12 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
         return try decodeToImages(denoisedLatents, configuration: config)
     }
 
-    func generateLatentSamples(configuration config: Configuration, scheduler: Scheduler) throws -> [MLShapedArray<Float32>] {
-        var sampleShape = unet.latentSampleShape
+    func generateLatentSamples(
+        configuration config: Configuration,
+        scheduler: Scheduler,
+        sampleShape expectedSampleShape: [Int]
+    ) throws -> [MLShapedArray<Float32>] {
+        var sampleShape = expectedSampleShape
         sampleShape[0] = 1
         
         let stdev = scheduler.initNoiseSigma

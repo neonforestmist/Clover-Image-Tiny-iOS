@@ -22,6 +22,26 @@ enum ModelDownloadError: LocalizedError {
 }
 
 final class ModelDownloader: Sendable {
+    /// Rebuild an existing installation's lightweight Resources directory.
+    /// Downloaded weights live under Shared/Variants and are not copied or
+    /// removed by this operation.
+    func repairInstallation(
+        variant: ModelCatalog.Variant,
+        catalog: ModelCatalog
+    ) throws -> URL {
+        try assemble(
+            variant: variant,
+            catalog: catalog,
+            commonRoot: ModelStorage.sharedURL(
+                revision: catalog.common.revision
+            ),
+            variantRoot: ModelStorage.variantURL(
+                id: variant.id,
+                revision: variant.revision
+            )
+        )
+    }
+
     func install(
         variant: ModelCatalog.Variant,
         catalog: ModelCatalog,
@@ -186,10 +206,36 @@ final class ModelDownloader: Sendable {
         from sourceRoot: URL,
         into resourcesURL: URL
     ) throws {
+        let destination = sourceRoot.appending(path: component)
         try FileManager.default.createSymbolicLink(
-            at: resourcesURL.appending(path: component),
-            withDestinationURL: sourceRoot.appending(path: component)
+            atPath: resourcesURL.appending(path: component).path,
+            withDestinationPath: relativePath(
+                from: resourcesURL,
+                to: destination
+            )
         )
+    }
+
+    /// App container UUIDs can change after an update or Xcode reinstall.
+    /// Relative links remain valid because all model content stays beneath
+    /// Documents/Models.
+    private func relativePath(from base: URL, to destination: URL) -> String {
+        let baseComponents = base.standardizedFileURL.pathComponents
+        let destinationComponents = destination
+            .standardizedFileURL
+            .pathComponents
+        var commonCount = 0
+        while commonCount < baseComponents.count,
+              commonCount < destinationComponents.count,
+              baseComponents[commonCount] == destinationComponents[commonCount] {
+            commonCount += 1
+        }
+        let parents = Array(
+            repeating: "..",
+            count: baseComponents.count - commonCount
+        )
+        let children = destinationComponents.dropFirst(commonCount)
+        return (parents + children).joined(separator: "/")
     }
 
     private func isValid(

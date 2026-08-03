@@ -69,27 +69,73 @@ struct GenerationSettingsSheet: View {
                     .accessibilityIdentifier("output-ratio-picker")
 
                     if settings.outputRatio == .custom {
-                        Stepper(
-                            value: $settings.customAspectWidth,
-                            in: 1...32
-                        ) {
-                            Label(
-                                "Width · \(settings.customAspectWidth)",
-                                systemImage: "arrow.left.and.right"
-                            )
-                        }
-                        .accessibilityIdentifier("custom-ratio-width-stepper")
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Label(
+                                    "Width",
+                                    systemImage: "arrow.left.and.right"
+                                )
+                                Spacer()
+                                Text(settings.customAspectWidth.formatted())
+                                    .foregroundStyle(.secondary)
+                            }
 
-                        Stepper(
-                            value: $settings.customAspectHeight,
-                            in: 1...32
-                        ) {
-                            Label(
-                                "Height · \(settings.customAspectHeight)",
-                                systemImage: "arrow.up.and.down"
+                            Slider(
+                                value: Binding(
+                                    get: {
+                                        Double(settings.customAspectWidth)
+                                    },
+                                    set: {
+                                        settings.customAspectWidth = Int(
+                                            $0.rounded()
+                                        )
+                                    }
+                                ),
+                                in: 1...32,
+                                step: 1
+                            )
+                            .accessibilityLabel("Custom aspect width")
+                            .accessibilityValue(
+                                settings.customAspectWidth.formatted()
+                            )
+                            .accessibilityIdentifier(
+                                "custom-ratio-width-slider"
                             )
                         }
-                        .accessibilityIdentifier("custom-ratio-height-stepper")
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Label(
+                                    "Height",
+                                    systemImage: "arrow.up.and.down"
+                                )
+                                Spacer()
+                                Text(settings.customAspectHeight.formatted())
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Slider(
+                                value: Binding(
+                                    get: {
+                                        Double(settings.customAspectHeight)
+                                    },
+                                    set: {
+                                        settings.customAspectHeight = Int(
+                                            $0.rounded()
+                                        )
+                                    }
+                                ),
+                                in: 1...32,
+                                step: 1
+                            )
+                            .accessibilityLabel("Custom aspect height")
+                            .accessibilityValue(
+                                settings.customAspectHeight.formatted()
+                            )
+                            .accessibilityIdentifier(
+                                "custom-ratio-height-slider"
+                            )
+                        }
                     }
                 } header: {
                     Text("Generation")

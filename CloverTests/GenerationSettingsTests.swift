@@ -128,7 +128,7 @@ final class GenerationSettingsTests: XCTestCase {
         )
     }
 
-    func testLegacySettingsDefaultToBaseModel() throws {
+    func testPreviouslySavedSettingsDefaultToBaseModel() throws {
         let data = Data(
             """
             {
@@ -195,7 +195,7 @@ final class GenerationSettingsTests: XCTestCase {
 
         let style = try XCTUnwrap(
             ModelStorage.importedStyles().first {
-                $0.weightsURL?.standardizedFileURL == url.standardizedFileURL
+                $0.weightsURL.standardizedFileURL == url.standardizedFileURL
             }
         )
 
@@ -210,8 +210,8 @@ final class GenerationSettingsTests: XCTestCase {
 
     func testCatalogBuildsPinnedHuggingFaceURL() {
         let file = ModelCatalog.ResourceFile(
-            path: "UnetChunk1.mlmodelc/weights/weight.bin",
-            remotePath: "variants/base/UnetChunk1.mlmodelc/weights/weight.bin",
+            path: "Unet.mlmodelc/weights/weight.bin",
+            remotePath: "common/Unet.mlmodelc/weights/weight.bin",
             size: 10,
             sha256: "abc"
         )
@@ -342,7 +342,6 @@ final class GenerationSettingsTests: XCTestCase {
 
         XCTAssertEqual(catalog.schemaVersion, 3)
         XCTAssertEqual(catalog.architecture, "stateful-lora")
-        XCTAssertEqual(watercolor.coreMLFunctionName, "watercolor_anime")
         XCTAssertEqual(watercolor.downloadSize, 6_927_128)
         XCTAssertEqual(
             watercolor.repository,
@@ -421,44 +420,4 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertEqual(adapter.tensorCount, 1)
     }
 
-    func testLocalMultifunctionModelFunctionsLoad() async throws {
-#if targetEnvironment(simulator)
-        throw XCTSkip(
-            "The current iOS Simulator runtime rejects Core ML multifunction selection; validate this test on an iPhone."
-        )
-#else
-        let modelURL = ModelStorage.rootURL
-            .appending(
-                path: "LocalMultifunction/Resources",
-                directoryHint: .isDirectory
-            )
-            .appending(
-                path: "UnetChunk1.mlmodelc",
-                directoryHint: .isDirectory
-            )
-        guard FileManager.default.fileExists(atPath: modelURL.path) else {
-            throw XCTSkip("Local multifunction validation model is absent")
-        }
-
-        for functionName in [
-            "base",
-            "monet",
-            "pointillism",
-            "watercolor_anime",
-        ] {
-            let configuration = MLModelConfiguration()
-            configuration.computeUnits = .all
-            configuration.functionName = functionName
-            let asset = try MLModelAsset(url: modelURL)
-            let model = try await MLModel.load(
-                asset: asset,
-                configuration: configuration
-            )
-            XCTAssertNotNil(
-                model.modelDescription
-                    .inputDescriptionsByName["sample"]
-            )
-        }
-#endif
-    }
 }

@@ -147,10 +147,13 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         progressHandler: (Progress) -> Bool = { _ in true }
     ) throws -> [CGImage?] {
 
+        let latentTimeIdShape = try unet.latentTimeIdShape()
+        let latentSampleShape = try unet.latentSampleShape()
+
         // Determine input type of Unet
         // SDXL Refiner has a latentTimeIdShape of [2, 5]
         // SDXL Base has either [12] or [2, 6]
-        let isRefiner = unet.latentTimeIdShape.last == 5
+        let isRefiner = latentTimeIdShape.last == 5
 
         // Setup geometry conditioning for base/refiner inputs
         var baseInput: ModelInputs?
@@ -158,12 +161,20 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
 
         // Check if the first textEncoder is available, which is required for base models
         if textEncoder != nil {
-            baseInput = try generateConditioning(using: config, forRefiner: isRefiner)
+            baseInput = try generateConditioning(
+                using: config,
+                forRefiner: isRefiner,
+                latentTimeIdShape: latentTimeIdShape
+            )
         }
 
         // Check if the refiner unet exists, or if the current unet is a refiner
         if unetRefiner != nil || isRefiner {
-            refinerInput = try generateConditioning(using: config, forRefiner: true)
+            refinerInput = try generateConditioning(
+                using: config,
+                forRefiner: true,
+                latentTimeIdShape: latentTimeIdShape
+            )
         }
 
         if reduceMemory {
@@ -181,7 +192,11 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         }
 
         // Generate random latent samples from specified seed
-        var latents: [MLShapedArray<Float32>] = try generateLatentSamples(configuration: config, scheduler: scheduler[0])
+        var latents: [MLShapedArray<Float32>] = try generateLatentSamples(
+            configuration: config,
+            scheduler: scheduler[0],
+            sampleShape: latentSampleShape
+        )
 
         // Store denoised latents from scheduler to pass into decoder
         var denoisedLatents: [MLShapedArray<Float32>] = latents.map { MLShapedArray(converting: $0) }
@@ -312,7 +327,11 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         return (embeds, pooled)
     }
 
-    func generateConditioning(using config: Configuration, forRefiner: Bool = false) throws -> ModelInputs {
+    func generateConditioning(
+        using config: Configuration,
+        forRefiner: Bool = false,
+        latentTimeIdShape: [Int]
+    ) throws -> ModelInputs {
         // Encode the input prompt and negative prompt
         let (promptEmbedding, pooled) = try encodePrompt(config.prompt, forRefiner: forRefiner)
         let (negativePromptEmbedding, negativePooled) = try encodePrompt(config.negativePrompt, forRefiner: forRefiner)
@@ -352,7 +371,7 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
                 ],
                 // TODO: This checks if the time_ids input is looking for [12] or [2, 6]
                 // Remove once model input shapes are ubiquitous
-                shape: unet.latentTimeIdShape.count > 1 ? [1, 6] : [6]
+                shape: latentTimeIdShape.count > 1 ? [1, 6] : [6]
             )
             return MLShapedArray<Float32>(concatenating: [geometry, geometry], alongAxis: 0)
         }
@@ -362,8 +381,12 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         return ModelInputs(hiddenStates: hiddenStates, pooledStates: pooledStates, geometryConditioning: geometry)
     }
 
-    func generateLatentSamples(configuration config: Configuration, scheduler: Scheduler) throws -> [MLShapedArray<Float32>] {
-        var sampleShape = unet.latentSampleShape
+    func generateLatentSamples(
+        configuration config: Configuration,
+        scheduler: Scheduler,
+        sampleShape expectedSampleShape: [Int]
+    ) throws -> [MLShapedArray<Float32>] {
+        var sampleShape = expectedSampleShape
         sampleShape[0] = 1
         
         let stdev = scheduler.initNoiseSigma

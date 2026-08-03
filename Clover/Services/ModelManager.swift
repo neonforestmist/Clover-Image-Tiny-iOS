@@ -15,7 +15,7 @@ final class ModelManager {
 
     private(set) var catalog: ModelCatalog
     private(set) var states: [String: InstallState] = [:]
-    /// LoRA files and legacy Core ML models side-loaded through Files.
+    /// LoRA styles side-loaded through Files.
     private(set) var imported: [ModelStorage.ImportedStyle] = []
     private(set) var isRefreshing = false
     var errorMessage: String?
@@ -199,17 +199,38 @@ final class ModelManager {
     private func refreshInstallStates() {
         for variant in catalog.variants where downloadTasks[variant.id] == nil {
             if catalog.schemaVersion >= 3 {
-                let resourcesURL = ModelStorage.installationURL(
+                let installationURL = ModelStorage.installationURL(
                     id: variant.id,
                     revision: variant.revision
-                ).appending(
+                )
+                let defaultResourcesURL = installationURL.appending(
                     path: "Resources",
                     directoryHint: .isDirectory
                 )
+                let adapterURL = defaultResourcesURL.appending(
+                    path: "Adapter.safetensors"
+                )
+                let needsRepair = !ModelStorage
+                    .isStatefulLoRAResourcesDirectory(defaultResourcesURL)
+                    || (variant.id != Self.baseID
+                        && !FileManager.default.fileExists(
+                            atPath: adapterURL.path
+                        ))
+                let resourcesURL: URL
+                if FileManager.default.fileExists(
+                    atPath: installationURL.path
+                ), needsRepair {
+                    resourcesURL = (try? downloader.repairInstallation(
+                        variant: variant,
+                        catalog: catalog
+                    )) ?? defaultResourcesURL
+                } else {
+                    resourcesURL = defaultResourcesURL
+                }
                 let hasAdapter = FileManager.default.fileExists(
-                    atPath: resourcesURL.appending(
-                        path: "Adapter.safetensors"
-                    ).path
+                    atPath: resourcesURL
+                        .appending(path: "Adapter.safetensors")
+                        .path
                 )
                 let isCurrent = !variant.revision.isEmpty
                     && ModelStorage.isStatefulLoRAResourcesDirectory(

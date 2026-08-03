@@ -28,7 +28,7 @@ struct CreateView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 20) {
+            VStack(spacing: 20) {
                 OutputCanvas(
                     artworks: store.latest,
                     phase: store.phase,
@@ -41,7 +41,7 @@ struct CreateView: View {
             .padding()
             .padding(.bottom, 12)
         }
-        .scrollDismissesKeyboard(.interactively)
+        .scrollDismissesKeyboard(.immediately)
         .environment(library)
         .navigationTitle("Create")
         .toolbar {
@@ -55,12 +55,23 @@ struct CreateView: View {
                 .accessibilityIdentifier("parameters-button")
                 .disabled(store.phase.isWorking)
             }
+
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    focusedField = nil
+                }
+                .fontWeight(.semibold)
+                .accessibilityIdentifier("dismiss-keyboard-button")
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            generationAction
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
+            if focusedField == nil {
+                generationAction
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+            }
         }
         .sheet(item: $store.presentedSheet) { destination in
             switch destination {
@@ -142,20 +153,28 @@ struct CreateView: View {
             Text("Prompt")
                 .font(.headline)
 
-            TextField(
-                "Describe the image you want",
-                text: $store.settings.prompt,
-                axis: .vertical
-            )
-            .lineLimit(3...7)
-            .textFieldStyle(.plain)
-            .focused($focusedField, equals: .prompt)
-            .padding(14)
+            ZStack(alignment: .topLeading) {
+                if store.settings.prompt.isEmpty {
+                    Text("Describe the image you want")
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+
+                TextEditor(text: $store.settings.prompt)
+                    .scrollContentBackground(.hidden)
+                    .focused($focusedField, equals: .prompt)
+                    .textInputAutocapitalization(.sentences)
+                    .accessibilityLabel("Prompt")
+                    .accessibilityIdentifier("prompt-field")
+            }
+            .frame(height: 112)
+            .padding(10)
             .background(
                 Color(.secondarySystemBackground),
                 in: .rect(cornerRadius: 14)
             )
-            .accessibilityIdentifier("prompt-field")
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
@@ -170,14 +189,25 @@ struct CreateView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                TextField(
-                    "What should Clover avoid?",
-                    text: $store.settings.negativePrompt,
-                    axis: .vertical
-                )
-                .lineLimit(2...5)
-                .textFieldStyle(.plain)
-                .focused($focusedField, equals: .negativePrompt)
+                ZStack(alignment: .topLeading) {
+                    if store.settings.negativePrompt.isEmpty {
+                        Text("What should Clover avoid?")
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+
+                    TextEditor(text: $store.settings.negativePrompt)
+                        .scrollContentBackground(.hidden)
+                        .focused(
+                            $focusedField,
+                            equals: .negativePrompt
+                        )
+                        .textInputAutocapitalization(.sentences)
+                        .accessibilityLabel("Negative Prompt")
+                }
+                .frame(height: 72)
 
                 Text("Describe details you don’t want in the generated image.")
                     .font(.caption)

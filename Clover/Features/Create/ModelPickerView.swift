@@ -174,7 +174,7 @@ struct ModelPickerView: View {
             Text("Imported Styles")
         } footer: {
             Text(
-                "Drop a Clover-compatible .safetensors file into On My iPhone › Clover › Imported Styles. The app detects the file and loads it into the installed Clover model. Legacy full Core ML folders still work."
+                "Drop a Clover-compatible .safetensors file into On My iPhone › Clover › Imported Styles. The app detects it and loads the style into your installed Clover model."
             )
         }
     }

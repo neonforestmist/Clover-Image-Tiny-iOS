@@ -112,13 +112,11 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
 
             let newPipeline = try CloverPipelineFactory.make(
                 resourcesURL: resourcesURL,
-                modelID: settings.modelID,
                 styleWeightsURL: ModelStorage.importedWeightsURL(
                     for: settings.modelID
                 ),
                 configuration: configuration
             )
-            try newPipeline.loadResources()
             pipeline = newPipeline
             loadedComputeTarget = settings.computeTarget
             loadedModelID = settings.modelID
@@ -135,17 +133,41 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
             prompt: settings.trimmedPrompt
         )
         configuration.negativePrompt = settings.negativePrompt
-        configuration.imageCount = settings.imageCount
+        configuration.imageCount = 1
         configuration.stepCount = settings.stepCount
-        configuration.seed = settings.seed
         configuration.guidanceScale = Float(settings.guidanceScale)
         configuration.schedulerType = settings.scheduler.coreMLScheduler
         configuration.rngType = settings.randomGenerator.coreMLRandomGenerator
+        configuration.disableSafety = CloverPipelineFactory
+            .isSafetyCheckerDisabled
 
-        let images = try pipeline.generateImages(configuration: configuration) { update in
-            let denominator = max(update.stepCount, 1)
-            progress(Double(update.step) / Double(denominator))
-            return !cancellation.isCancelled
+        defer { pipeline.unloadResources() }
+
+        let imageCount = max(settings.imageCount, 1)
+        var images: [CGImage?] = []
+        images.reserveCapacity(imageCount)
+
+        for imageIndex in 0..<imageCount {
+            guard !cancellation.isCancelled else {
+                throw GenerationError.cancelled
+            }
+
+            configuration.seed = settings.seed &+ UInt32(imageIndex)
+            let generated = try autoreleasepool {
+                try pipeline.generateImages(
+                    configuration: configuration
+                ) { update in
+                    let stepCount = max(update.stepCount, 1)
+                    let imageProgress = Double(update.step)
+                        / Double(stepCount)
+                    let totalProgress = (
+                        Double(imageIndex) + imageProgress
+                    ) / Double(imageCount)
+                    progress(totalProgress)
+                    return !cancellation.isCancelled
+                }
+            }
+            images.append(contentsOf: generated)
         }
 
         guard !cancellation.isCancelled else {
@@ -226,7 +248,10 @@ private extension GenerationSettings.RandomGenerator {
 private extension GenerationSettings.ComputeTarget {
     var coreMLComputeUnits: MLComputeUnits {
         #if targetEnvironment(simulator)
-        return .cpuAndGPU
+        // Stateful ML Programs can fail to build a GPU execution plan in the
+        // simulator. CPU-only keeps simulator smoke tests deterministic; real
+        // iPhones continue to honor the selected compute target below.
+        return .cpuOnly
         #else
         switch self {
         case .neuralEngine: .cpuAndNeuralEngine

@@ -196,7 +196,8 @@ struct GenerationSettings: Codable, Equatable, Sendable {
     }
 
     static func restored() -> Self {
-        if ProcessInfo.processInfo.arguments.contains("-ui-testing-reset") {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-ui-testing-reset") {
             UserDefaults.standard.removeObject(forKey: defaultsKey)
             return Self()
         }
@@ -206,7 +207,15 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         else {
             return Self()
         }
-        return settings
+        guard arguments.contains("-ui-testing-real-model") else {
+            return settings
+        }
+
+        var smokeTestSettings = settings
+        smokeTestSettings.stepCount = 4
+        smokeTestSettings.imageCount = 1
+        smokeTestSettings.computeTarget = .neuralEngine
+        return smokeTestSettings
     }
 
     func persist() {

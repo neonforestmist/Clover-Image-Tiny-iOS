@@ -36,7 +36,6 @@ struct ModelCatalog: Codable, Equatable, Sendable {
         let trigger: String?
         let sourceLoRA: String?
         let dataset: String?
-        let functionName: String?
         let repository: String?
         let revision: String
         let downloadSize: Int64
@@ -49,16 +48,10 @@ struct ModelCatalog: Codable, Equatable, Sendable {
             case trigger
             case sourceLoRA = "source_lora"
             case dataset
-            case functionName = "function_name"
             case repository
             case revision
             case downloadSize = "download_size"
             case files
-        }
-
-        var coreMLFunctionName: String {
-            functionName
-                ?? id.replacingOccurrences(of: "-", with: "_")
         }
 
         var iconAssetName: String {
@@ -134,7 +127,6 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 trigger: nil,
                 sourceLoRA: nil,
                 dataset: nil,
-                functionName: nil,
                 repository: nil,
                 revision: "",
                 downloadSize: 0,
@@ -147,7 +139,6 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 trigger: "Monet Style",
                 sourceLoRA: "neonforestmist/clover-image-tiny-monet-lora",
                 dataset: "neonforestmist/GPT_Monet_Style_Images",
-                functionName: nil,
                 repository: "neonforestmist/clover-image-tiny-monet-lora-coreml",
                 revision: "",
                 downloadSize: 6_927_128,
@@ -160,7 +151,6 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 trigger: "pointillism painting",
                 sourceLoRA: "neonforestmist/clover-image-tiny-pointillism-lora",
                 dataset: "neonforestmist/GPT_Pointillism_Style_Images",
-                functionName: nil,
                 repository: "neonforestmist/clover-image-tiny-pointillism-lora-coreml",
                 revision: "",
                 downloadSize: 6_927_128,
@@ -173,7 +163,6 @@ struct ModelCatalog: Codable, Equatable, Sendable {
                 trigger: "watercolor anime",
                 sourceLoRA: "neonforestmist/clover-image-tiny-watercolor-anime-lora",
                 dataset: "neonforestmist/GPT_Watercolor_Anime_Style_Images",
-                functionName: nil,
                 repository: "neonforestmist/clover-image-tiny-watercolor-anime-lora-coreml",
                 revision: "",
                 downloadSize: 6_927_128,

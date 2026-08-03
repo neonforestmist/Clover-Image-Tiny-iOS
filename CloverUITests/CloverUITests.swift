@@ -33,16 +33,50 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(seed.waitForExistence(timeout: 3))
         app.buttons["Done"].tap()
 
-        let prompt = app.textFields["prompt-field"]
+        let prompt = app.textViews["prompt-field"]
         XCTAssertTrue(prompt.waitForExistence(timeout: 3))
         prompt.tap()
         prompt.typeText("a tiny greenhouse at night")
+        app.buttons["dismiss-keyboard-button"].tap()
 
         let generate = app.buttons["generate-button"]
+        XCTAssertTrue(generate.waitForExistence(timeout: 3))
         XCTAssertTrue(generate.isEnabled)
         generate.tap()
 
         app.tabBars.buttons["Library"].tap()
         XCTAssertTrue(app.buttons["artwork-tile"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testInstalledModelGeneration() throws {
+        guard ProcessInfo.processInfo.environment[
+            "CLOVER_RUN_REAL_MODEL_TEST"
+        ] == "1" else {
+            throw XCTSkip("Requires an installed Clover model on an iPhone")
+        }
+
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-DisableSafetyChecker",
+            "YES",
+            "-ui-testing-real-model",
+        ]
+        app.launch()
+
+        let modelPicker = app.buttons["model-picker-button"]
+        XCTAssertTrue(modelPicker.waitForExistence(timeout: 10))
+
+        let generate = app.buttons["generate-button"]
+        XCTAssertTrue(generate.waitForExistence(timeout: 5))
+        XCTAssertTrue(generate.isEnabled)
+        generate.tap()
+
+        let cancel = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] 'Cancel'")
+        ).firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 30))
+        XCTAssertTrue(generate.waitForExistence(timeout: 600))
+        XCTAssertEqual(app.state, .runningForeground)
     }
 }
