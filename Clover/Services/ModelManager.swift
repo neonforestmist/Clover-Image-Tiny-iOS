@@ -270,6 +270,17 @@ final class ModelManager {
                 ) == nil ? .notInstalled : .installed
             }
         }
+
+        // A terminated update can leave the previous shared U-Net behind
+        // after the current base and styles have already been repaired. Once
+        // every variant has been evaluated against the current catalog, the
+        // old shared revisions are no longer referenced and can be reclaimed.
+        if states[Self.baseID] == .installed,
+           !catalog.common.revision.isEmpty {
+            ModelStorage.removeObsoleteSharedRevisions(
+                keeping: catalog.common.revision
+            )
+        }
     }
 
     private static func cachedCatalog() -> ModelCatalog? {
