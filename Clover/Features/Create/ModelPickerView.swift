@@ -192,6 +192,15 @@ struct ModelPickerView: View {
     // MARK: - Actions
 
     private func select(_ id: String) {
+        let previousTrigger = manager.variant(
+            id: settings.modelID
+        )?.trigger
+        let trigger = manager.variant(id: id)?.trigger
+
+        settings.applyStyleTrigger(
+            trigger,
+            replacing: previousTrigger
+        )
         settings.modelID = id
         settings.persist()
         HapticManager.selection()

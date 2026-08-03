@@ -60,6 +60,74 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertEqual(settings.trimmedPrompt, "a glass greenhouse")
     }
 
+    func testStyleTriggerIsInsertedBeforePrompt() {
+        var settings = GenerationSettings()
+        settings.prompt = "a garden at sunrise"
+
+        settings.applyStyleTrigger(
+            "Monet Style",
+            replacing: nil
+        )
+
+        XCTAssertEqual(
+            settings.prompt,
+            "Monet Style, a garden at sunrise"
+        )
+    }
+
+    func testStyleTriggerIsInsertedWithEditableSpaceForEmptyPrompt() {
+        var settings = GenerationSettings()
+
+        settings.applyStyleTrigger(
+            "watercolor anime",
+            replacing: nil
+        )
+
+        XCTAssertEqual(settings.prompt, "watercolor anime, ")
+    }
+
+    func testSwitchingStylesReplacesTheTriggerPrefix() {
+        var settings = GenerationSettings()
+        settings.prompt = "Monet Style, a garden at sunrise"
+
+        settings.applyStyleTrigger(
+            "pointillism painting",
+            replacing: "Monet Style"
+        )
+
+        XCTAssertEqual(
+            settings.prompt,
+            "pointillism painting, a garden at sunrise"
+        )
+    }
+
+    func testReturningToCloverRemovesTheStyleTriggerPrefix() {
+        var settings = GenerationSettings()
+        settings.prompt = "watercolor anime, a quiet city"
+
+        settings.applyStyleTrigger(
+            nil,
+            replacing: "watercolor anime"
+        )
+
+        XCTAssertEqual(settings.prompt, "a quiet city")
+    }
+
+    func testExistingStyleTriggerIsNotDuplicated() {
+        var settings = GenerationSettings()
+        settings.prompt = "MONET STYLE, a garden at sunrise"
+
+        settings.applyStyleTrigger(
+            "Monet Style",
+            replacing: nil
+        )
+
+        XCTAssertEqual(
+            settings.prompt,
+            "MONET STYLE, a garden at sunrise"
+        )
+    }
+
     func testLegacySettingsDefaultToBaseModel() throws {
         let data = Data(
             """

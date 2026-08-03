@@ -157,7 +157,19 @@ struct CreateView: View {
             )
             .accessibilityIdentifier("prompt-field")
 
-            DisclosureGroup("Negative prompt") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Label("Negative Prompt", systemImage: "eye.slash")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    Spacer()
+
+                    Text("Optional")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 TextField(
                     "What should Clover avoid?",
                     text: $store.settings.negativePrompt,
@@ -166,10 +178,18 @@ struct CreateView: View {
                 .lineLimit(2...5)
                 .textFieldStyle(.plain)
                 .focused($focusedField, equals: .negativePrompt)
-                .padding(.top, 8)
+
+                Text("Describe details you don’t want in the generated image.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .padding(14)
+            .background(
+                Color(.secondarySystemBackground),
+                in: .rect(cornerRadius: 14)
+            )
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("negative-prompt-field")
 
             parameterSummary
         }

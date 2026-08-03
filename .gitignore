@@ -13,5 +13,17 @@ xcuserdata/
 .build/
 .swiftpm/
 
-# Local configuration
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
 *.xcconfig.local
+
+# Apple signing credentials
+*.cer
+*.key
+*.mobileprovision
+*.p12
+*.pem
+*.pfx
+*.provisionprofile

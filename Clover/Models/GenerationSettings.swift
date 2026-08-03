@@ -218,6 +218,37 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    mutating func applyStyleTrigger(
+        _ trigger: String?,
+        replacing previousTrigger: String?
+    ) {
+        var content = prompt
+
+        if let previousTrigger {
+            content = Self.removingTriggerPrefix(
+                previousTrigger,
+                from: content
+            )
+        }
+
+        guard let trigger, !trigger.isEmpty else {
+            prompt = content
+            return
+        }
+
+        if Self.hasTriggerPrefix(trigger, in: content) {
+            prompt = content
+            return
+        }
+
+        let trimmedContent = content.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        prompt = trimmedContent.isEmpty
+            ? "\(trigger), "
+            : "\(trigger), \(trimmedContent)"
+    }
+
     var outputDimensions: String {
         guard outputRatio == .custom else { return outputRatio.dimensions }
         return "\(safeCustomAspectWidth):\(safeCustomAspectHeight)"
@@ -256,6 +287,32 @@ struct GenerationSettings: Codable, Equatable, Sendable {
 
     private var safeCustomAspectHeight: Int {
         min(max(customAspectHeight, 1), 32)
+    }
+
+    private static func hasTriggerPrefix(
+        _ trigger: String,
+        in prompt: String
+    ) -> Bool {
+        prompt.drop { $0.isWhitespace }.range(
+            of: "\(trigger),",
+            options: [.anchored, .caseInsensitive]
+        ) != nil
+    }
+
+    private static func removingTriggerPrefix(
+        _ trigger: String,
+        from prompt: String
+    ) -> String {
+        let leadingTrimmed = prompt.drop { $0.isWhitespace }
+        guard let range = leadingTrimmed.range(
+            of: "\(trigger),",
+            options: [.anchored, .caseInsensitive]
+        ) else {
+            return prompt
+        }
+
+        return String(leadingTrimmed[range.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
