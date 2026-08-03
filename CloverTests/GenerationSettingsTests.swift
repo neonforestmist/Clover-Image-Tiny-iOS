@@ -4,6 +4,25 @@ import XCTest
 @testable import Clover
 
 final class GenerationSettingsTests: XCTestCase {
+    func testCoreMLExecutionPlanErrorsUseAnActionableMessage() {
+        let rawError = NSError(
+            domain: "com.apple.CoreML",
+            code: 0,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Failed to build the model execution plan at /private/var/mobile/model.mil",
+            ]
+        )
+
+        let error = GenerationError.presenting(rawError)
+
+        XCTAssertEqual(
+            error.localizedDescription,
+            GenerationError.modelExecutionPlan.localizedDescription
+        )
+        XCTAssertFalse(error.localizedDescription.contains("/private/var"))
+    }
+
     func testModelStorageIsVisibleInDocuments() {
         let documentsURL = FileManager.default.urls(
             for: .documentDirectory,
@@ -48,9 +67,6 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertEqual(snapshot.seed, 41)
         XCTAssertEqual(snapshot.imageIndex, 2)
         XCTAssertEqual(snapshot.modelID, "base")
-        XCTAssertEqual(snapshot.outputRatio, .square)
-        XCTAssertEqual(snapshot.customAspectWidth, 3)
-        XCTAssertEqual(snapshot.customAspectHeight, 2)
     }
 
     func testPromptTrimming() {
@@ -151,40 +167,33 @@ final class GenerationSettingsTests: XCTestCase {
         )
 
         XCTAssertEqual(settings.modelID, "base")
-        XCTAssertEqual(settings.outputRatio, .square)
-        XCTAssertEqual(settings.customAspectWidth, 3)
-        XCTAssertEqual(settings.customAspectHeight, 2)
     }
 
-    func testOutputRatiosCropA512SquareWithoutResizing() {
-        let source = CGSize(width: 512, height: 512)
-        var settings = GenerationSettings()
-
-        XCTAssertEqual(
-            settings.croppedSize(from: source),
-            CGSize(width: 512, height: 512)
+    func testPreviouslySavedAspectRatioFieldsAreIgnored() throws {
+        let data = Data(
+            """
+            {
+              "prompt": "a blue cat",
+              "outputRatio": "custom",
+              "customAspectWidth": 3,
+              "customAspectHeight": 2
+            }
+            """.utf8
         )
 
-        settings.outputRatio = .portrait
-        XCTAssertEqual(
-            settings.croppedSize(from: source),
-            CGSize(width: 410, height: 512)
+        let settings = try JSONDecoder().decode(
+            GenerationSettings.self,
+            from: data
+        )
+        let encoded = try JSONEncoder().encode(settings)
+        let encodedObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
 
-        settings.outputRatio = .cinematic
-        XCTAssertEqual(
-            settings.croppedSize(from: source),
-            CGSize(width: 512, height: 288)
-        )
-
-        settings.outputRatio = .custom
-        settings.customAspectWidth = 3
-        settings.customAspectHeight = 2
-        XCTAssertEqual(settings.outputDimensions, "3:2")
-        XCTAssertEqual(
-            settings.croppedSize(from: source),
-            CGSize(width: 512, height: 341)
-        )
+        XCTAssertEqual(settings.prompt, "a blue cat")
+        XCTAssertNil(encodedObject["outputRatio"])
+        XCTAssertNil(encodedObject["customAspectWidth"])
+        XCTAssertNil(encodedObject["customAspectHeight"])
     }
 
     func testImportedStylesDetectStandaloneSafetensors() throws {

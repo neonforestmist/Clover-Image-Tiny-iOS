@@ -19,7 +19,7 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 - Guidance from 1.0–20.0
 - Reproducible seeds with seed randomization
 - One to four images per generation
-- Aspect-ratio presets with SF Symbols plus a custom width:height crop
+- Native 512 × 512 output without post-generation cropping
 - PNDM and DPM-Solver++ schedulers
 - NumPy and PyTorch-compatible random generators
 - Neural Engine, automatic, and GPU compute preferences

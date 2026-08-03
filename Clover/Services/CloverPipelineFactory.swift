@@ -76,10 +76,23 @@ enum CloverPipelineFactory {
 
         let unetConfiguration = configuration.copy()
             as! MLModelConfiguration
+        let fallbackComputeUnits: MLComputeUnits?
+        #if targetEnvironment(simulator)
+        unetConfiguration.computeUnits = .cpuOnly
+        fallbackComputeUnits = nil
+        #else
+        // Clover's mutable LoRA state is not supported by the Neural Engine
+        // execution planner. The GPU backend supports the stateful U-Net;
+        // CPU remains a safe fallback if a device cannot build the GPU plan.
+        // The remaining models continue to use the selected compute target.
+        unetConfiguration.computeUnits = .cpuAndGPU
+        fallbackComputeUnits = .cpuOnly
+        #endif
         let unet = Unet(
             modelAt: urls.unetURL,
             configuration: unetConfiguration,
-            loraAdapter: adapter
+            loraAdapter: adapter,
+            fallbackComputeUnits: fallbackComputeUnits
         )
         let decoder = Decoder(
             modelAt: urls.decoderURL,

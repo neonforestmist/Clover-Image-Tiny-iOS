@@ -27,6 +27,10 @@ public final class ManagedMLModel: ResourceManaging {
     /// State belongs to the currently loaded model and is rebuilt after unload.
     var loadedState: AnyObject?
 
+    /// Optional compute backend used when Core ML cannot build an execution
+    /// plan with the preferred configuration.
+    var fallbackComputeUnits: MLComputeUnits?
+
     /// Queue to protect access to loaded model
     var queue: DispatchQueue
 
@@ -45,6 +49,7 @@ public final class ManagedMLModel: ResourceManaging {
         self.makeLoadedState = nil
         self.loadedModel = nil
         self.loadedState = nil
+        self.fallbackComputeUnits = nil
         self.queue = DispatchQueue(label: "managed.\(url.lastPathComponent)")
     }
 
@@ -53,9 +58,11 @@ public final class ManagedMLModel: ResourceManaging {
     public convenience init(
         modelAt url: URL,
         configuration: MLModelConfiguration,
-        loraAdapter: LoRAAdapter?
+        loraAdapter: LoRAAdapter?,
+        fallbackComputeUnits: MLComputeUnits? = nil
     ) {
         self.init(modelAt: url, configuration: configuration)
+        self.fallbackComputeUnits = fallbackComputeUnits
         makeLoadedState = { model in
             guard !model.modelDescription
                 .stateDescriptionsByName.isEmpty else {
@@ -129,45 +136,20 @@ public final class ManagedMLModel: ResourceManaging {
 
     private func loadModel() throws {
         if loadedModel == nil {
-            if #available(
-                iOS 18.0,
-                macOS 15.0,
-                tvOS 18.0,
-                watchOS 11.0,
-                *
-            ), configuration.functionName != nil {
-                // A multi-function ML Program must be loaded from MLModelAsset.
-                // The older synchronous URL initializer rejects functionName.
-                let asset = try MLModelAsset(url: modelURL)
-                let group = DispatchGroup()
-                let lock = NSLock()
-                var result: Result<MLModel, Error>?
-
-                group.enter()
-                MLModel.load(
-                    asset,
-                    configuration: configuration
-                ) { model, error in
-                    lock.withLock {
-                        if let model {
-                            result = .success(model)
-                        } else {
-                            result = .failure(
-                                error ?? CocoaError(.fileReadUnknown)
-                            )
-                        }
-                    }
-                    group.leave()
+            do {
+                loadedModel = try loadModel(configuration: configuration)
+            } catch {
+                guard let fallbackComputeUnits,
+                      fallbackComputeUnits != configuration.computeUnits,
+                      let fallbackConfiguration = configuration.copy()
+                        as? MLModelConfiguration else {
+                    throw error
                 }
-                group.wait()
-                loadedModel = try lock.withLock {
-                    try result!.get()
-                }
-            } else {
-                loadedModel = try MLModel(
-                    contentsOf: modelURL,
-                    configuration: configuration
+                fallbackConfiguration.computeUnits = fallbackComputeUnits
+                loadedModel = try loadModel(
+                    configuration: fallbackConfiguration
                 )
+                configuration = fallbackConfiguration
             }
 
             if #available(
@@ -180,6 +162,51 @@ public final class ManagedMLModel: ResourceManaging {
                let makeLoadedState {
                 loadedState = try makeLoadedState(model)
             }
+        }
+    }
+
+    private func loadModel(
+        configuration: MLModelConfiguration
+    ) throws -> MLModel {
+        if #available(
+            iOS 18.0,
+            macOS 15.0,
+            tvOS 18.0,
+            watchOS 11.0,
+            *
+        ), configuration.functionName != nil {
+            // A multi-function ML Program must be loaded from MLModelAsset.
+            // The older synchronous URL initializer rejects functionName.
+            let asset = try MLModelAsset(url: modelURL)
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var result: Result<MLModel, Error>?
+
+            group.enter()
+            MLModel.load(
+                asset,
+                configuration: configuration
+            ) { model, error in
+                lock.withLock {
+                    if let model {
+                        result = .success(model)
+                    } else {
+                        result = .failure(
+                            error ?? CocoaError(.fileReadUnknown)
+                        )
+                    }
+                }
+                group.leave()
+            }
+            group.wait()
+            return try lock.withLock {
+                try result!.get()
+            }
+        } else {
+            return try MLModel(
+                contentsOf: modelURL,
+                configuration: configuration
+            )
         }
     }
 }

@@ -3,7 +3,6 @@ import SwiftUI
 struct OutputCanvas: View {
     let artworks: [Artwork]
     let phase: GenerationStore.Phase
-    let outputAspectRatio: CGFloat
 
     @State private var selection = 0
 
@@ -15,7 +14,7 @@ struct OutputCanvas: View {
                 artworkPager
             }
         }
-        .aspectRatio(outputAspectRatio, contentMode: .fit)
+        .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: .infinity)
         .background(Color(.secondarySystemBackground))
         .clipShape(.rect(cornerRadius: 22))

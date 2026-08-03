@@ -49,13 +49,15 @@ public struct Unet: ResourceManaging {
     public init(
         modelAt url: URL,
         configuration: MLModelConfiguration,
-        loraAdapter: LoRAAdapter?
+        loraAdapter: LoRAAdapter?,
+        fallbackComputeUnits: MLComputeUnits? = nil
     ) {
         self.models = [
             ManagedMLModel(
                 modelAt: url,
                 configuration: configuration,
-                loraAdapter: loraAdapter
+                loraAdapter: loraAdapter,
+                fallbackComputeUnits: fallbackComputeUnits
             )
         ]
     }

@@ -11,6 +11,7 @@ struct GeneratedImage: @unchecked Sendable {
 enum GenerationError: LocalizedError {
     case missingResources
     case noSafeImages
+    case modelExecutionPlan
     case cancelled
 
     var errorDescription: String? {
@@ -19,9 +20,22 @@ enum GenerationError: LocalizedError {
             "The Core ML resources are missing from this build."
         case .noSafeImages:
             "The safety checker did not return an image."
+        case .modelExecutionPlan:
+            "Clover couldn’t start its Core ML model. Restart the app and try again. If it continues, remove and download Clover again."
         case .cancelled:
             "Generation was cancelled."
         }
+    }
+
+    static func presenting(_ error: Error) -> Error {
+        let coreMLError = error as NSError
+        guard coreMLError.domain == "com.apple.CoreML",
+              coreMLError.localizedDescription.localizedCaseInsensitiveContains(
+                "execution plan"
+              ) else {
+            return error
+        }
+        return GenerationError.modelExecutionPlan
     }
 }
 
@@ -84,7 +98,9 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                             )
                         )
                     } catch {
-                        continuation.resume(throwing: error)
+                        continuation.resume(
+                            throwing: GenerationError.presenting(error)
+                        )
                     }
                 }
             }
@@ -174,9 +190,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
             throw GenerationError.cancelled
         }
 
-        let safeImages = images.compactMap { $0 }.compactMap {
-            $0.cropped(using: settings)
-        }.map(GeneratedImage.init)
+        let safeImages = images.compactMap { $0 }.map(GeneratedImage.init)
         guard !safeImages.isEmpty else {
             throw GenerationError.noSafeImages
         }
@@ -202,28 +216,9 @@ final class PreviewGenerationService: ImageGenerating, @unchecked Sendable {
         guard let image = UIImage(named: "SampleOutput")?.cgImage else {
             throw GenerationError.missingResources
         }
-        guard let cropped = image.cropped(using: settings) else {
-            throw GenerationError.missingResources
-        }
         return (0..<settings.imageCount).map { _ in
-            GeneratedImage(cgImage: cropped)
+            GeneratedImage(cgImage: image)
         }
-    }
-}
-
-extension CGImage {
-    func cropped(
-        using settings: GenerationSettings
-    ) -> CGImage? {
-        let source = CGSize(width: width, height: height)
-        let target = settings.croppedSize(from: source)
-        let rect = CGRect(
-            x: ((source.width - target.width) / 2).rounded(.down),
-            y: ((source.height - target.height) / 2).rounded(.down),
-            width: target.width,
-            height: target.height
-        )
-        return cropping(to: rect)
     }
 }
 

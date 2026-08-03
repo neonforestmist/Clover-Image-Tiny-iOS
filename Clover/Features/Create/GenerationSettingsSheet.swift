@@ -53,94 +53,10 @@ struct GenerationSettingsSheet: View {
                         in: 1...4
                     )
                     .accessibilityIdentifier("image-count-stepper")
-
-                    Picker("Aspect Ratio", selection: $settings.outputRatio) {
-                        ForEach(GenerationSettings.OutputRatio.allCases) { ratio in
-                            Label {
-                                Text(ratio == .custom
-                                    ? ratio.title
-                                    : "\(ratio.title) · \(ratio.dimensions)")
-                            } icon: {
-                                Image(systemName: ratio.systemImage)
-                            }
-                                .tag(ratio)
-                        }
-                    }
-                    .accessibilityIdentifier("output-ratio-picker")
-
-                    if settings.outputRatio == .custom {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Label(
-                                    "Width",
-                                    systemImage: "arrow.left.and.right"
-                                )
-                                Spacer()
-                                Text(settings.customAspectWidth.formatted())
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Slider(
-                                value: Binding(
-                                    get: {
-                                        Double(settings.customAspectWidth)
-                                    },
-                                    set: {
-                                        settings.customAspectWidth = Int(
-                                            $0.rounded()
-                                        )
-                                    }
-                                ),
-                                in: 1...32,
-                                step: 1
-                            )
-                            .accessibilityLabel("Custom aspect width")
-                            .accessibilityValue(
-                                settings.customAspectWidth.formatted()
-                            )
-                            .accessibilityIdentifier(
-                                "custom-ratio-width-slider"
-                            )
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Label(
-                                    "Height",
-                                    systemImage: "arrow.up.and.down"
-                                )
-                                Spacer()
-                                Text(settings.customAspectHeight.formatted())
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Slider(
-                                value: Binding(
-                                    get: {
-                                        Double(settings.customAspectHeight)
-                                    },
-                                    set: {
-                                        settings.customAspectHeight = Int(
-                                            $0.rounded()
-                                        )
-                                    }
-                                ),
-                                in: 1...32,
-                                step: 1
-                            )
-                            .accessibilityLabel("Custom aspect height")
-                            .accessibilityValue(
-                                settings.customAspectHeight.formatted()
-                            )
-                            .accessibilityIdentifier(
-                                "custom-ratio-height-slider"
-                            )
-                        }
-                    }
                 } header: {
                     Text("Generation")
                 } footer: {
-                    Text("Clover generates at 512×512. Non-square output uses a centered crop, so it adds no model download.")
+                    Text("Clover generates natively at 512 × 512.")
                 }
 
                 Section("Seed") {
@@ -191,15 +107,11 @@ struct GenerationSettingsSheet: View {
                 } header: {
                     Text("Performance")
                 } footer: {
-                    Text("Neural Engine is recommended for this model. Changing compute mode reloads the pipeline.")
+                    Text("Clover automatically routes its LoRA model to a compatible processor. Changing compute mode reloads the pipeline.")
                 }
 
                 Section {
-                    LabeledContent(
-                        "Output",
-                        value: settings.outputDimensions
-                    )
-                    LabeledContent("Generation", value: "512 × 512")
+                    LabeledContent("Resolution", value: "512 × 512")
                     LabeledContent("Model", value: settings.modelID.capitalized)
                     LabeledContent("Runs", value: "On device")
                 }
