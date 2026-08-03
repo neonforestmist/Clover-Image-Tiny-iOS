@@ -58,6 +58,34 @@ final class GenerationSettingsTests: XCTestCase {
         )
     }
 
+    func testInstalledResourcesMustMatchTheSharedModelRevision() throws {
+        let resourcesURL = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(
+            at: resourcesURL,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: resourcesURL) }
+        try "new-shared-revision".write(
+            to: resourcesURL.appending(path: ".common-revision"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            ModelStorage.usesCommonRevision(
+                resourcesURL,
+                revision: "new-shared-revision"
+            )
+        )
+        XCTAssertFalse(
+            ModelStorage.usesCommonRevision(
+                resourcesURL,
+                revision: "old-shared-revision"
+            )
+        )
+    }
+
     func testSnapshotKeepsTheGenerationSeed() {
         var settings = GenerationSettings()
         settings.seed = 41

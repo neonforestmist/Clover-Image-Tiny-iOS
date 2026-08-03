@@ -217,4 +217,22 @@ enum ModelStorage {
     static func isStatefulLoRAResourcesDirectory(_ url: URL) -> Bool {
         isUsableResourcesDirectory(url)
     }
+
+    static func usesCommonRevision(
+        _ resourcesURL: URL,
+        revision: String
+    ) -> Bool {
+        guard !revision.isEmpty,
+              let installedRevision = try? String(
+                contentsOf: resourcesURL.appending(
+                    path: ".common-revision"
+                ),
+                encoding: .utf8
+              ) else {
+            return false
+        }
+        return installedRevision.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ) == revision
+    }
 }

@@ -198,6 +198,11 @@ final class ModelDownloader: Sendable {
                 into: resourcesURL
             )
         }
+        try catalog.common.revision.write(
+            to: resourcesURL.appending(path: ".common-revision"),
+            atomically: true,
+            encoding: .utf8
+        )
         return resourcesURL
     }
 

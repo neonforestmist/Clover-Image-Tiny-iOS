@@ -80,11 +80,13 @@ After installation, prompts and generated images stay on the device. Network
 access is used to refresh the catalog and download model files from Hugging
 Face.
 
-The stateful U-Net runs with CPU and GPU compute because its mutable style
-buffers are not execution-planned reliably on the Neural Engine. Other pipeline
-components still honor the selected compute preference. Validate real
-generation on an iPhone or iPad; the Simulator is suitable for UI testing. The
-first generation may take longer while Core ML compiles and caches its graphs.
+The stateful U-Net uses a batch-one input and runs classifier-free guidance in
+two serial passes, cutting the largest activation peak roughly in half. It runs
+with CPU and GPU compute because its mutable style buffers are not
+execution-planned reliably on the Neural Engine. Other pipeline components
+still honor the selected compute preference. Validate real generation on an
+iPhone or iPad; the Simulator is suitable for UI testing. The first generation
+may take longer while Core ML compiles and caches its graphs.
 
 ## Project structure
 

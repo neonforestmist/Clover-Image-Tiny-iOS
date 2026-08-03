@@ -139,6 +139,11 @@ final class ModelManager {
                     resourcesURL: resourcesURL
                 )
                 states[variant.id] = .installed
+                if variant.id == Self.baseID {
+                    // A shared-model update can keep the small style files but
+                    // must relink each installed style to the new U-Net.
+                    refreshInstallStates()
+                }
             } catch is CancellationError {
                 states[variant.id] = .notInstalled
             } catch {
@@ -212,6 +217,10 @@ final class ModelManager {
                 )
                 let needsRepair = !ModelStorage
                     .isStatefulLoRAResourcesDirectory(defaultResourcesURL)
+                    || !ModelStorage.usesCommonRevision(
+                        defaultResourcesURL,
+                        revision: catalog.common.revision
+                    )
                     || (variant.id != Self.baseID
                         && !FileManager.default.fileExists(
                             atPath: adapterURL.path
@@ -235,6 +244,10 @@ final class ModelManager {
                 let isCurrent = !variant.revision.isEmpty
                     && ModelStorage.isStatefulLoRAResourcesDirectory(
                         resourcesURL
+                    )
+                    && ModelStorage.usesCommonRevision(
+                        resourcesURL,
+                        revision: catalog.common.revision
                     )
                     && (variant.id == Self.baseID || hasAdapter)
                 if isCurrent {
