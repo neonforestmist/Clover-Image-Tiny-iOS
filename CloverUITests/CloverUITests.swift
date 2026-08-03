@@ -15,6 +15,20 @@ final class CloverUITests: XCTestCase {
                 .waitForExistence(timeout: 3)
         )
         XCTAssertTrue(app.otherElements["model-base"].exists)
+
+        let useMonet = app.buttons["Use Monet"]
+        XCTAssertTrue(useMonet.waitForExistence(timeout: 3))
+        useMonet.tap()
+        XCTAssertFalse(app.buttons["Remove Download"].exists)
+
+        let manageMonet = app.buttons["manage-download-monet"]
+        XCTAssertTrue(manageMonet.waitForExistence(timeout: 3))
+        manageMonet.tap()
+        XCTAssertTrue(
+            app.buttons["Remove Download"].waitForExistence(timeout: 3)
+        )
+        app.tap()
+
         app.buttons["Done"].tap()
 
         let parameters = app.buttons["parameters-button"]

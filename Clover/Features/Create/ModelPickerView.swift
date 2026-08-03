@@ -289,11 +289,6 @@ private struct ModelVariantRow: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("model-\(variant.id)")
-        .contextMenu {
-            if state == .installed {
-                Button("Remove Download", role: .destructive, action: remove)
-            }
-        }
     }
 
     private var icon: some View {
@@ -310,15 +305,31 @@ private struct ModelVariantRow: View {
     private var action: some View {
         switch state {
         case .installed:
-            if isSelected {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.cloverGreen)
-                    .accessibilityLabel("\(variant.name), selected")
-            } else {
-                Button("Use", action: select)
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Use \(variant.name)")
+            HStack(spacing: 12) {
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.cloverGreen)
+                        .accessibilityLabel("\(variant.name), selected")
+                } else {
+                    Button("Use", action: select)
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Use \(variant.name)")
+                }
+
+                Menu {
+                    Button(role: .destructive, action: remove) {
+                        Label("Remove Download", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 28, minHeight: 28)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Manage \(variant.name) download")
+                .accessibilityIdentifier("manage-download-\(variant.id)")
             }
 
         case .downloading:
