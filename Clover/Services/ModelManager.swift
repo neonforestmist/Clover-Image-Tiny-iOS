@@ -142,6 +142,9 @@ final class ModelManager {
                 if variant.id == Self.baseID {
                     // A shared-model update can keep the small style files but
                     // must relink each installed style to the new U-Net.
+                    ModelStorage.removeObsoleteSharedRevisions(
+                        keeping: catalog.common.revision
+                    )
                     refreshInstallStates()
                 }
             } catch is CancellationError {

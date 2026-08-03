@@ -86,6 +86,36 @@ final class GenerationSettingsTests: XCTestCase {
         )
     }
 
+    func testSharedModelUpdateRemovesOnlyOlderRevisions() throws {
+        let sharedRoot = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let current = sharedRoot.appending(
+            path: "current-revision",
+            directoryHint: .isDirectory
+        )
+        let obsolete = sharedRoot.appending(
+            path: "obsolete-revision",
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: current,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: obsolete,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: sharedRoot) }
+
+        ModelStorage.removeObsoleteSharedRevisions(
+            keeping: "current-revision",
+            under: sharedRoot
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: current.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: obsolete.path))
+    }
+
     func testSnapshotKeepsTheGenerationSeed() {
         var settings = GenerationSettings()
         settings.seed = 41

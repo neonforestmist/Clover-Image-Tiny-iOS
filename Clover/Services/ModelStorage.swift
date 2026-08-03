@@ -125,9 +125,30 @@ enum ModelStorage {
     }
 
     static func sharedURL(revision: String) -> URL {
-        rootURL
-            .appending(path: "Shared", directoryHint: .isDirectory)
+        sharedRootURL
             .appending(path: revision, directoryHint: .isDirectory)
+    }
+
+    private static var sharedRootURL: URL {
+        rootURL.appending(path: "Shared", directoryHint: .isDirectory)
+    }
+
+    static func removeObsoleteSharedRevisions(
+        keeping revision: String,
+        under root: URL? = nil
+    ) {
+        guard !revision.isEmpty else { return }
+        let sharedRoot = root ?? sharedRootURL
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: sharedRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+        for entry in entries where entry.lastPathComponent != revision {
+            try? FileManager.default.removeItem(at: entry)
+        }
     }
 
     static func variantURL(id: String, revision: String) -> URL {
