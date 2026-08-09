@@ -139,12 +139,15 @@ struct GenerationSettings: Codable, Equatable, Sendable {
             Bool.self,
             forKey: .livePreviewEnabled
         ) ?? defaults.livePreviewEnabled
-        previewInterval = max(
-            1,
-            try container.decodeIfPresent(
-                Int.self,
-                forKey: .previewInterval
-            ) ?? defaults.previewInterval
+        previewInterval = min(
+            10,
+            max(
+                1,
+                try container.decodeIfPresent(
+                    Int.self,
+                    forKey: .previewInterval
+                ) ?? defaults.previewInterval
+            )
         )
     }
 

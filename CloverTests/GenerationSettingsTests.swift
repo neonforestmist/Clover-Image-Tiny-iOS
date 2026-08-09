@@ -1,5 +1,6 @@
 import CoreML
 import StableDiffusion
+import UIKit
 import XCTest
 @testable import Clover
 
@@ -246,6 +247,121 @@ final class GenerationSettingsTests: XCTestCase {
 
         XCTAssertTrue(settings.livePreviewEnabled)
         XCTAssertEqual(settings.previewInterval, 1)
+    }
+
+    func testLivePreviewIntervalClampsAtTen() throws {
+        let data = Data(
+            """
+            {
+              "livePreviewEnabled": true,
+              "previewInterval": 99
+            }
+            """.utf8
+        )
+
+        let settings = try JSONDecoder().decode(
+            GenerationSettings.self,
+            from: data
+        )
+
+        XCTAssertEqual(settings.previewInterval, 10)
+    }
+
+    @MainActor
+    func testArtworkLibraryStoresPreviewTimelineUnderOneArtwork() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "CloverArtworkTests-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let image = UIGraphicsImageRenderer(
+            size: CGSize(width: 16, height: 16)
+        ).image { context in
+            UIColor.systemGreen.setFill()
+            context.fill(
+                CGRect(x: 0, y: 0, width: 16, height: 16)
+            )
+        }
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let jpegData = try XCTUnwrap(
+            image.jpegData(compressionQuality: 0.86)
+        )
+        var settings = GenerationSettings()
+        settings.prompt = "a green square"
+        settings.stepCount = 15
+
+        let library = ArtworkLibrary(directoryURL: directory)
+        let additions = try library.add(
+            images: [GeneratedImage(cgImage: cgImage, imageIndex: 0)],
+            previewFrames: [
+                GeneratedPreviewFrame(
+                    jpegData: jpegData,
+                    step: 5,
+                    stepCount: 15,
+                    imageIndex: 0
+                ),
+                GeneratedPreviewFrame(
+                    jpegData: jpegData,
+                    step: 10,
+                    stepCount: 15,
+                    imageIndex: 0
+                ),
+            ],
+            settings: settings
+        )
+
+        let artwork = try XCTUnwrap(additions.first)
+        XCTAssertEqual(additions.count, 1)
+        XCTAssertEqual(library.artworks.count, 1)
+        XCTAssertEqual(
+            library.previewFrames(for: artwork).map(\.step),
+            [5, 10]
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: library.imageURL(for: artwork).path
+            )
+        )
+        for frame in artwork.previewFrames {
+            XCTAssertTrue(
+                FileManager.default.fileExists(
+                    atPath: library.previewURL(
+                        for: artwork,
+                        frame: frame
+                    ).path
+                )
+            )
+        }
+        XCTAssertEqual(
+            library.frameURL(for: artwork, at: 2),
+            library.imageURL(for: artwork)
+        )
+
+        library.delete(artwork)
+        XCTAssertTrue(library.artworks.isEmpty)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: library.imageURL(for: artwork).path
+            )
+        )
+    }
+
+    func testPreviewGenerationServiceReturnsSavedStepFrames() async throws {
+        var settings = GenerationSettings()
+        settings.livePreviewEnabled = true
+        settings.previewInterval = 5
+        settings.stepCount = 12
+        settings.imageCount = 1
+
+        let result = try await PreviewGenerationService().generate(
+            settings: settings,
+            cancellation: GenerationCancellationToken()
+        ) { _ in }
+
+        XCTAssertEqual(result.images.count, 1)
+        XCTAssertEqual(result.previewFrames.map(\.step), [5, 10])
+        XCTAssertTrue(result.previewFrames.allSatisfy { !$0.jpegData.isEmpty })
     }
 
     func testPreviouslySavedAspectRatioFieldsAreIgnored() throws {

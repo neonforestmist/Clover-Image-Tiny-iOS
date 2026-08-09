@@ -6,13 +6,28 @@ struct ArtworkDetailView: View {
 
     @State private var saveError: String?
     @State private var savedToPhotos = false
+    @State private var frameSelection: Int
+
+    init(artwork: Artwork, library: ArtworkLibrary) {
+        self.artwork = artwork
+        self.library = library
+        _frameSelection = State(initialValue: artwork.previewFrames.count)
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                ArtworkImage(artwork: artwork)
+                ArtworkFrameImage(
+                    artwork: artwork,
+                    frameIndex: frameSelection
+                )
                     .aspectRatio(1, contentMode: .fit)
                     .clipShape(.rect(cornerRadius: 18))
+
+                ArtworkTimelineControls(
+                    artwork: artwork,
+                    selection: $frameSelection
+                )
 
                 actions
                 metadata
@@ -44,7 +59,12 @@ struct ArtworkDetailView: View {
 
     private var actions: some View {
         HStack {
-            ShareLink(item: library.imageURL(for: artwork)) {
+            ShareLink(
+                item: library.frameURL(
+                    for: artwork,
+                    at: frameSelection
+                )
+            ) {
                 Label("Share", systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity)
             }
@@ -70,6 +90,12 @@ struct ArtworkDetailView: View {
 
             LabeledContent("Seed", value: "\(artwork.generation.seed)")
             LabeledContent("Steps", value: "\(artwork.generation.stepCount)")
+            if !library.previewFrames(for: artwork).isEmpty {
+                LabeledContent(
+                    "Timeline",
+                    value: "\(library.previewFrames(for: artwork).count + 1) frames"
+                )
+            }
             LabeledContent(
                 "Guidance",
                 value: artwork.generation.guidanceScale.formatted(
@@ -90,7 +116,10 @@ struct ArtworkDetailView: View {
     }
 
     private func saveToPhotoLibrary() {
-        guard let image = library.image(for: artwork) else { return }
+        guard let image = library.frameImage(
+            for: artwork,
+            at: frameSelection
+        ) else { return }
         Task {
             do {
                 try await PhotoLibrarySaver.save(image)

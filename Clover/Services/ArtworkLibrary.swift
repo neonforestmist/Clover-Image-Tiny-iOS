@@ -36,32 +36,55 @@ final class ArtworkLibrary {
 
     func add(
         images: [GeneratedImage],
+        previewFrames: [GeneratedPreviewFrame] = [],
         settings: GenerationSettings
     ) throws -> [Artwork] {
         var additions: [Artwork] = []
 
-        for (index, generated) in images.enumerated() {
+        for generated in images {
             let id = UUID()
-            let filename = "\(id.uuidString).png"
+            let artifactDirectory = directoryURL.appending(
+                path: id.uuidString,
+                directoryHint: .isDirectory
+            )
+            let filename = "\(id.uuidString)/final.png"
             let url = directoryURL.appending(path: filename)
             guard
                 let data = UIImage(cgImage: generated.cgImage).pngData()
             else {
                 continue
             }
-            try data.write(to: url, options: .atomic)
 
-            additions.append(
-                Artwork(
-                    id: id,
-                    createdAt: .now,
-                    filename: filename,
-                    generation: GenerationSnapshot(
-                        settings: settings,
-                        imageIndex: index
+            do {
+                try fileManager.createDirectory(
+                    at: artifactDirectory,
+                    withIntermediateDirectories: true
+                )
+                try data.write(to: url, options: .atomic)
+
+                let previews = try persistPreviewFrames(
+                    previewFrames,
+                    forImageIndex: generated.imageIndex,
+                    artworkID: id,
+                    artifactDirectory: artifactDirectory
+                )
+
+                additions.append(
+                    Artwork(
+                        id: id,
+                        createdAt: .now,
+                        filename: filename,
+                        previewFrames: previews,
+                        generation: GenerationSnapshot(
+                            settings: settings,
+                            imageIndex: generated.imageIndex
+                        )
                     )
                 )
-            )
+            } catch {
+                try? fileManager.removeItem(at: artifactDirectory)
+                throw error
+            }
         }
 
         artworks.insert(contentsOf: additions, at: 0)
@@ -70,7 +93,20 @@ final class ArtworkLibrary {
     }
 
     func delete(_ artwork: Artwork) {
-        try? fileManager.removeItem(at: imageURL(for: artwork))
+        let artifactDirectory = directoryURL.appending(
+            path: artwork.id.uuidString,
+            directoryHint: .isDirectory
+        )
+        if fileManager.fileExists(atPath: artifactDirectory.path) {
+            try? fileManager.removeItem(at: artifactDirectory)
+        } else {
+            try? fileManager.removeItem(at: imageURL(for: artwork))
+            for preview in artwork.previewFrames {
+                try? fileManager.removeItem(
+                    at: previewURL(for: artwork, frame: preview)
+                )
+            }
+        }
         artworks.removeAll { $0.id == artwork.id }
         try? persist()
     }
@@ -81,6 +117,107 @@ final class ArtworkLibrary {
 
     func image(for artwork: Artwork) -> UIImage? {
         UIImage(contentsOfFile: imageURL(for: artwork).path)
+    }
+
+    func previewFrames(for artwork: Artwork) -> [ArtworkPreviewFrame] {
+        artwork.previewFrames
+            .filter {
+                fileManager.fileExists(
+                    atPath: previewURL(for: artwork, frame: $0).path
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.step == rhs.step {
+                    return lhs.filename < rhs.filename
+                }
+                return lhs.step < rhs.step
+            }
+    }
+
+    func previewURL(
+        for artwork: Artwork,
+        frame: ArtworkPreviewFrame
+    ) -> URL {
+        directoryURL.appending(path: frame.filename)
+    }
+
+    func previewImage(
+        for artwork: Artwork,
+        frame: ArtworkPreviewFrame
+    ) -> UIImage? {
+        UIImage(
+            contentsOfFile: previewURL(for: artwork, frame: frame).path
+        )
+    }
+
+    func frameURL(for artwork: Artwork, at index: Int) -> URL {
+        let previews = previewFrames(for: artwork)
+        guard previews.indices.contains(index) else {
+            return imageURL(for: artwork)
+        }
+        return previewURL(for: artwork, frame: previews[index])
+    }
+
+    func frameImage(for artwork: Artwork, at index: Int) -> UIImage? {
+        let previews = previewFrames(for: artwork)
+        guard previews.indices.contains(index) else {
+            return image(for: artwork)
+        }
+        return previewImage(for: artwork, frame: previews[index])
+    }
+
+    func frameStep(for artwork: Artwork, at index: Int) -> Int {
+        let previews = previewFrames(for: artwork)
+        guard previews.indices.contains(index) else {
+            return artwork.generation.stepCount
+        }
+        return previews[index].step
+    }
+
+    private func persistPreviewFrames(
+        _ frames: [GeneratedPreviewFrame],
+        forImageIndex imageIndex: Int,
+        artworkID: UUID,
+        artifactDirectory: URL
+    ) throws -> [ArtworkPreviewFrame] {
+        let selectedFrames = Dictionary(
+            frames
+                .filter {
+                    $0.imageIndex == imageIndex && $0.step < $0.stepCount
+                }
+                .map { ($0.step, $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        .values
+        .sorted { $0.step < $1.step }
+
+        guard !selectedFrames.isEmpty else { return [] }
+
+        let previewsDirectory = artifactDirectory.appending(
+            path: "previews",
+            directoryHint: .isDirectory
+        )
+        try fileManager.createDirectory(
+            at: previewsDirectory,
+            withIntermediateDirectories: true
+        )
+
+        return try selectedFrames.map { frame in
+            let leafFilename = String(
+                format: "step-%04d.jpg",
+                frame.step
+            )
+            let relativeFilename = "\(artworkID.uuidString)/previews/\(leafFilename)"
+            try frame.jpegData.write(
+                to: directoryURL.appending(path: relativeFilename),
+                options: .atomic
+            )
+            return ArtworkPreviewFrame(
+                step: frame.step,
+                stepCount: frame.stepCount,
+                filename: relativeFilename
+            )
+        }
     }
 
     private func restore() {

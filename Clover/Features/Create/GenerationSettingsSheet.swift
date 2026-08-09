@@ -122,7 +122,7 @@ struct GenerationSettingsSheet: View {
                 } header: {
                     Text("Progress Preview")
                 } footer: {
-                    Text("Previews are decoded in memory and never saved. More frequent previews can make generation slower and use more battery.")
+                    Text("Preview frames are saved with the finished artwork and can be scrubbed or exported later. More frequent previews use additional storage, can slow generation, and use more battery.")
                 }
 
                 Section {
@@ -162,7 +162,7 @@ struct GenerationSettingsSheet: View {
     }
 
     private var previewIntervalLimit: Int {
-        max(settings.stepCount, 1)
+        min(max(settings.stepCount, 1), 10)
     }
 
     private var previewIntervalTitle: String {

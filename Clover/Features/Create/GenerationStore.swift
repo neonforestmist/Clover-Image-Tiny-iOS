@@ -49,7 +49,7 @@ final class GenerationStore {
         task = Task { [weak self, generator, library] in
             guard let self else { return }
             do {
-                let images = try await generator.generate(
+                let result = try await generator.generate(
                     settings: request,
                     cancellation: token
                 ) { update in
@@ -62,7 +62,11 @@ final class GenerationStore {
                 }
 
                 guard !Task.isCancelled else { return }
-                latest = try library.add(images: images, settings: request)
+                latest = try library.add(
+                    images: result.images,
+                    previewFrames: result.previewFrames,
+                    settings: request
+                )
                 preview = nil
                 phase = .finished
                 HapticManager.success()

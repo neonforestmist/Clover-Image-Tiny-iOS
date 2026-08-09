@@ -1,13 +1,38 @@
 import SwiftUI
 
 struct OutputCanvas: View {
+    @Environment(ArtworkLibrary.self) private var library
+
     let artworks: [Artwork]
     let phase: GenerationStore.Phase
     let preview: GenerationPreview?
 
     @State private var selection = 0
+    @State private var frameSelection = 0
 
     var body: some View {
+        VStack(spacing: 12) {
+            canvas
+
+            if !phase.isWorking, let currentArtwork {
+                ArtworkTimelineControls(
+                    artwork: currentArtwork,
+                    selection: $frameSelection,
+                    showsExportAction: true
+                )
+                .padding(.horizontal, 4)
+            }
+        }
+        .onChange(of: artworkIDs, initial: true) {
+            selection = 0
+            selectFinalFrame()
+        }
+        .onChange(of: selection) {
+            selectFinalFrame()
+        }
+    }
+
+    private var canvas: some View {
         Group {
             if let preview, phase.isWorking {
                 previewImage(preview)
@@ -33,6 +58,15 @@ struct OutputCanvas: View {
         .accessibilityIdentifier("output-canvas")
     }
 
+    private var artworkIDs: [UUID] {
+        artworks.map(\.id)
+    }
+
+    private var currentArtwork: Artwork? {
+        guard artworks.indices.contains(selection) else { return nil }
+        return artworks[selection]
+    }
+
     private var emptyState: some View {
         ContentUnavailableView {
             Label("Ready to Create", systemImage: "photo.badge.plus")
@@ -44,11 +78,22 @@ struct OutputCanvas: View {
     private var artworkPager: some View {
         TabView(selection: $selection) {
             ForEach(Array(artworks.enumerated()), id: \.element.id) { index, artwork in
-                ArtworkImage(artwork: artwork)
+                ArtworkFrameImage(
+                    artwork: artwork,
+                    frameIndex: index == selection ? frameSelection : 0
+                )
                     .tag(index)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: artworks.count > 1 ? .always : .never))
+    }
+
+    private func selectFinalFrame() {
+        guard let currentArtwork else {
+            frameSelection = 0
+            return
+        }
+        frameSelection = library.previewFrames(for: currentArtwork).count
     }
 
     private func previewImage(_ preview: GenerationPreview) -> some View {

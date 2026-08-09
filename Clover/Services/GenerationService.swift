@@ -6,6 +6,19 @@ import UIKit
 
 struct GeneratedImage: @unchecked Sendable {
     let cgImage: CGImage
+    let imageIndex: Int
+}
+
+struct GeneratedPreviewFrame: Sendable {
+    let jpegData: Data
+    let step: Int
+    let stepCount: Int
+    let imageIndex: Int
+}
+
+struct GenerationResult: Sendable {
+    let images: [GeneratedImage]
+    let previewFrames: [GeneratedPreviewFrame]
 }
 
 struct GenerationPreview: @unchecked Sendable {
@@ -71,7 +84,7 @@ protocol ImageGenerating: Sendable {
         settings: GenerationSettings,
         cancellation: GenerationCancellationToken,
         progress: @escaping @Sendable (GenerationUpdate) -> Void
-    ) async throws -> [GeneratedImage]
+    ) async throws -> GenerationResult
 }
 
 enum GenerationServiceFactory {
@@ -97,7 +110,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
         settings: GenerationSettings,
         cancellation: GenerationCancellationToken,
         progress: @escaping @Sendable (GenerationUpdate) -> Void
-    ) async throws -> [GeneratedImage] {
+    ) async throws -> GenerationResult {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 queue.async { [self] in
@@ -125,7 +138,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
         settings: GenerationSettings,
         cancellation: GenerationCancellationToken,
         progress: @escaping @Sendable (GenerationUpdate) -> Void
-    ) throws -> [GeneratedImage] {
+    ) throws -> GenerationResult {
         guard let resourcesURL = ModelStorage.resourcesURL(
             for: settings.modelID
         ) else {
@@ -173,8 +186,9 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
         defer { pipeline.unloadResources() }
 
         let imageCount = max(settings.imageCount, 1)
-        var images: [CGImage?] = []
+        var images: [GeneratedImage] = []
         images.reserveCapacity(imageCount)
+        var storedPreviews: [GeneratedPreviewFrame] = []
 
         for imageIndex in 0..<imageCount {
             guard !cancellation.isCancelled else {
@@ -194,7 +208,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                         Double(imageIndex) + imageProgress
                     ) / Double(imageCount)
                     let previewInterval = min(
-                        max(settings.previewInterval, 1),
+                        min(max(settings.previewInterval, 1), 10),
                         stepCount
                     )
                     let shouldPreview = settings.livePreviewEnabled
@@ -213,6 +227,19 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                             stepCount: stepCount,
                             imageIndex: imageIndex
                         )
+                        if completedStep < stepCount,
+                           let jpegData = UIImage(cgImage: image).jpegData(
+                               compressionQuality: 0.86
+                           ) {
+                            storedPreviews.append(
+                                GeneratedPreviewFrame(
+                                    jpegData: jpegData,
+                                    step: completedStep,
+                                    stepCount: stepCount,
+                                    imageIndex: imageIndex
+                                )
+                            )
+                        }
                     }
                     progress(
                         GenerationUpdate(
@@ -223,19 +250,33 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                     return !cancellation.isCancelled
                 }
             }
-            images.append(contentsOf: generated)
+            images.append(
+                contentsOf: generated.compactMap { image in
+                    image.map {
+                        GeneratedImage(
+                            cgImage: $0,
+                            imageIndex: imageIndex
+                        )
+                    }
+                }
+            )
         }
 
         guard !cancellation.isCancelled else {
             throw GenerationError.cancelled
         }
 
-        let safeImages = images.compactMap { $0 }.map(GeneratedImage.init)
-        guard !safeImages.isEmpty else {
+        guard !images.isEmpty else {
             throw GenerationError.noSafeImages
         }
         progress(GenerationUpdate(progress: 1, preview: nil))
-        return safeImages
+        let safeImageIndices = Set(images.map(\.imageIndex))
+        return GenerationResult(
+            images: images,
+            previewFrames: storedPreviews.filter {
+                safeImageIndices.contains($0.imageIndex)
+            }
+        )
     }
 }
 
@@ -244,46 +285,62 @@ final class PreviewGenerationService: ImageGenerating, @unchecked Sendable {
         settings: GenerationSettings,
         cancellation: GenerationCancellationToken,
         progress: @escaping @Sendable (GenerationUpdate) -> Void
-    ) async throws -> [GeneratedImage] {
+    ) async throws -> GenerationResult {
         guard let image = UIImage(named: "SampleOutput")?.cgImage else {
             throw GenerationError.missingResources
         }
-        let previewSteps = max(min(settings.stepCount, 10), 1)
-        for tick in 1...previewSteps {
-            try await Task.sleep(for: .milliseconds(90))
+        let stepCount = max(settings.stepCount, 1)
+        let previewInterval = min(
+            min(max(settings.previewInterval, 1), 10),
+            stepCount
+        )
+        let jpegData = UIImage(cgImage: image).jpegData(
+            compressionQuality: 0.86
+        )
+        var storedPreviews: [GeneratedPreviewFrame] = []
+
+        for completedStep in 1...stepCount {
+            try await Task.sleep(for: .milliseconds(30))
             guard !cancellation.isCancelled else {
                 throw GenerationError.cancelled
             }
-            let completedStep = Int(
-                ceil(
-                    Double(tick) / Double(previewSteps)
-                        * Double(max(settings.stepCount, 1))
-                )
-            )
-            let interval = min(
-                max(settings.previewInterval, 1),
-                max(settings.stepCount, 1)
-            )
             let shouldPreview = settings.livePreviewEnabled
-                && (completedStep.isMultiple(of: interval)
-                    || tick == previewSteps)
+                && (completedStep.isMultiple(of: previewInterval)
+                    || completedStep == stepCount)
+            if shouldPreview,
+               completedStep < stepCount,
+               let jpegData {
+                for imageIndex in 0..<settings.imageCount {
+                    storedPreviews.append(
+                        GeneratedPreviewFrame(
+                            jpegData: jpegData,
+                            step: completedStep,
+                            stepCount: stepCount,
+                            imageIndex: imageIndex
+                        )
+                    )
+                }
+            }
             progress(
                 GenerationUpdate(
-                    progress: Double(tick) / Double(previewSteps),
+                    progress: Double(completedStep) / Double(stepCount),
                     preview: shouldPreview
                         ? GenerationPreview(
                             cgImage: image,
                             step: completedStep,
-                            stepCount: max(settings.stepCount, 1),
+                            stepCount: stepCount,
                             imageIndex: 0
                         )
                         : nil
                 )
             )
         }
-        return (0..<settings.imageCount).map { _ in
-            GeneratedImage(cgImage: image)
-        }
+        return GenerationResult(
+            images: (0..<settings.imageCount).map {
+                GeneratedImage(cgImage: image, imageIndex: $0)
+            },
+            previewFrames: storedPreviews
+        )
     }
 }
 

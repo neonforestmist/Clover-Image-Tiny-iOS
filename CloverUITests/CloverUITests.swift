@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 
 final class CloverUITests: XCTestCase {
@@ -46,7 +47,9 @@ final class CloverUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(livePreview.waitForExistence(timeout: 3))
-        livePreview.tap()
+        livePreview.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)
+        ).tap()
         app.buttons["Done"].tap()
 
         let prompt = app.textViews["prompt-field"]
@@ -60,8 +63,17 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(generate.isEnabled)
         generate.tap()
 
+        XCTAssertTrue(
+            app.sliders["artwork-timeline-slider"]
+                .waitForExistence(timeout: 8)
+        )
+
         app.tabBars.buttons["Library"].tap()
-        XCTAssertTrue(app.buttons["artwork-tile"].waitForExistence(timeout: 8))
+        let artwork = app.buttons["artwork-tile"]
+        XCTAssertTrue(artwork.waitForExistence(timeout: 8))
+        artwork.tap()
+        XCTAssertTrue(app.navigationBars["Image"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.sliders["artwork-timeline-slider"].exists)
     }
 
     @MainActor
