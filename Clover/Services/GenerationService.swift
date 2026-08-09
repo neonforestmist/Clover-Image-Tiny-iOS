@@ -8,6 +8,18 @@ struct GeneratedImage: @unchecked Sendable {
     let cgImage: CGImage
 }
 
+struct GenerationPreview: @unchecked Sendable {
+    let cgImage: CGImage
+    let step: Int
+    let stepCount: Int
+    let imageIndex: Int
+}
+
+struct GenerationUpdate: @unchecked Sendable {
+    let progress: Double
+    let preview: GenerationPreview?
+}
+
 enum GenerationError: LocalizedError {
     case missingResources
     case noSafeImages
@@ -58,7 +70,7 @@ protocol ImageGenerating: Sendable {
     func generate(
         settings: GenerationSettings,
         cancellation: GenerationCancellationToken,
-        progress: @escaping @Sendable (Double) -> Void
+        progress: @escaping @Sendable (GenerationUpdate) -> Void
     ) async throws -> [GeneratedImage]
 }
 
@@ -84,7 +96,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
     func generate(
         settings: GenerationSettings,
         cancellation: GenerationCancellationToken,
-        progress: @escaping @Sendable (Double) -> Void
+        progress: @escaping @Sendable (GenerationUpdate) -> Void
     ) async throws -> [GeneratedImage] {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -112,7 +124,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
     private func run(
         settings: GenerationSettings,
         cancellation: GenerationCancellationToken,
-        progress: @escaping @Sendable (Double) -> Void
+        progress: @escaping @Sendable (GenerationUpdate) -> Void
     ) throws -> [GeneratedImage] {
         guard let resourcesURL = ModelStorage.resourcesURL(
             for: settings.modelID
@@ -154,6 +166,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
         configuration.guidanceScale = Float(settings.guidanceScale)
         configuration.schedulerType = settings.scheduler.coreMLScheduler
         configuration.rngType = settings.randomGenerator.coreMLRandomGenerator
+        configuration.useDenoisedIntermediates = settings.livePreviewEnabled
         configuration.disableSafety = CloverPipelineFactory
             .isSafetyCheckerDisabled
 
@@ -174,12 +187,39 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                     configuration: configuration
                 ) { update in
                     let stepCount = max(update.stepCount, 1)
-                    let imageProgress = Double(update.step)
+                    let completedStep = min(update.step + 1, stepCount)
+                    let imageProgress = Double(completedStep)
                         / Double(stepCount)
                     let totalProgress = (
                         Double(imageIndex) + imageProgress
                     ) / Double(imageCount)
-                    progress(totalProgress)
+                    let previewInterval = min(
+                        max(settings.previewInterval, 1),
+                        stepCount
+                    )
+                    let shouldPreview = settings.livePreviewEnabled
+                        && (completedStep.isMultiple(of: previewInterval)
+                            || completedStep == stepCount)
+                    var preview: GenerationPreview?
+                    if shouldPreview,
+                       let decoded = try? update.pipeline.decodeToImages(
+                           update.currentLatentSamples,
+                           configuration: update.configuration
+                       ),
+                       let image = decoded.compactMap({ $0 }).first {
+                        preview = GenerationPreview(
+                            cgImage: image,
+                            step: completedStep,
+                            stepCount: stepCount,
+                            imageIndex: imageIndex
+                        )
+                    }
+                    progress(
+                        GenerationUpdate(
+                            progress: totalProgress,
+                            preview: preview
+                        )
+                    )
                     return !cancellation.isCancelled
                 }
             }
@@ -194,7 +234,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
         guard !safeImages.isEmpty else {
             throw GenerationError.noSafeImages
         }
-        progress(1)
+        progress(GenerationUpdate(progress: 1, preview: nil))
         return safeImages
     }
 }
@@ -203,18 +243,43 @@ final class PreviewGenerationService: ImageGenerating, @unchecked Sendable {
     func generate(
         settings: GenerationSettings,
         cancellation: GenerationCancellationToken,
-        progress: @escaping @Sendable (Double) -> Void
+        progress: @escaping @Sendable (GenerationUpdate) -> Void
     ) async throws -> [GeneratedImage] {
-        for step in 1...10 {
+        guard let image = UIImage(named: "SampleOutput")?.cgImage else {
+            throw GenerationError.missingResources
+        }
+        let previewSteps = max(min(settings.stepCount, 10), 1)
+        for tick in 1...previewSteps {
             try await Task.sleep(for: .milliseconds(90))
             guard !cancellation.isCancelled else {
                 throw GenerationError.cancelled
             }
-            progress(Double(step) / 10)
-        }
-
-        guard let image = UIImage(named: "SampleOutput")?.cgImage else {
-            throw GenerationError.missingResources
+            let completedStep = Int(
+                ceil(
+                    Double(tick) / Double(previewSteps)
+                        * Double(max(settings.stepCount, 1))
+                )
+            )
+            let interval = min(
+                max(settings.previewInterval, 1),
+                max(settings.stepCount, 1)
+            )
+            let shouldPreview = settings.livePreviewEnabled
+                && (completedStep.isMultiple(of: interval)
+                    || tick == previewSteps)
+            progress(
+                GenerationUpdate(
+                    progress: Double(tick) / Double(previewSteps),
+                    preview: shouldPreview
+                        ? GenerationPreview(
+                            cgImage: image,
+                            step: completedStep,
+                            stepCount: max(settings.stepCount, 1),
+                            imageIndex: 0
+                        )
+                        : nil
+                )
+            )
         }
         return (0..<settings.imageCount).map { _ in
             GeneratedImage(cgImage: image)

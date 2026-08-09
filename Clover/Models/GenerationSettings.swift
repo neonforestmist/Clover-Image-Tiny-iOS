@@ -70,6 +70,8 @@ struct GenerationSettings: Codable, Equatable, Sendable {
     var randomGenerator = RandomGenerator.numpy
     var computeTarget = ComputeTarget.neuralEngine
     var modelID = "base"
+    var livePreviewEnabled = false
+    var previewInterval = 5
 
     static let defaultsKey = "generation-settings"
 
@@ -84,6 +86,8 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         case randomGenerator
         case computeTarget
         case modelID
+        case livePreviewEnabled
+        case previewInterval
     }
 
     init() {}
@@ -131,6 +135,17 @@ struct GenerationSettings: Codable, Equatable, Sendable {
             String.self,
             forKey: .modelID
         ) ?? defaults.modelID
+        livePreviewEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .livePreviewEnabled
+        ) ?? defaults.livePreviewEnabled
+        previewInterval = max(
+            1,
+            try container.decodeIfPresent(
+                Int.self,
+                forKey: .previewInterval
+            ) ?? defaults.previewInterval
+        )
     }
 
     static func restored() -> Self {

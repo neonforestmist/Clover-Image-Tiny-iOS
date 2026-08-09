@@ -21,6 +21,7 @@ final class GenerationStore {
     var settings = GenerationSettings.restored()
     private(set) var phase = Phase.idle
     private(set) var latest: [Artwork] = []
+    private(set) var preview: GenerationPreview?
     var presentedSheet: SheetDestination?
     var errorMessage: String?
 
@@ -39,6 +40,7 @@ final class GenerationStore {
 
         settings.persist()
         phase = .preparing
+        preview = nil
         errorMessage = nil
         let request = settings
         let token = GenerationCancellationToken()
@@ -50,21 +52,28 @@ final class GenerationStore {
                 let images = try await generator.generate(
                     settings: request,
                     cancellation: token
-                ) { progress in
+                ) { update in
                     Task { @MainActor [self] in
-                        self.phase = .generating(progress)
+                        self.phase = .generating(update.progress)
+                        if let preview = update.preview {
+                            self.preview = preview
+                        }
                     }
                 }
 
                 guard !Task.isCancelled else { return }
                 latest = try library.add(images: images, settings: request)
+                preview = nil
                 phase = .finished
                 HapticManager.success()
             } catch GenerationError.cancelled {
+                preview = nil
                 phase = .idle
             } catch is CancellationError {
+                preview = nil
                 phase = .idle
             } catch {
+                preview = nil
                 phase = .idle
                 errorMessage = error.localizedDescription
                 HapticManager.error()
@@ -77,6 +86,7 @@ final class GenerationStore {
     func cancel() {
         cancellation?.cancel()
         task?.cancel()
+        preview = nil
         phase = .idle
     }
 }

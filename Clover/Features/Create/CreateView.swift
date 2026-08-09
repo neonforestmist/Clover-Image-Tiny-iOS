@@ -31,7 +31,8 @@ struct CreateView: View {
             VStack(spacing: 20) {
                 OutputCanvas(
                     artworks: store.latest,
-                    phase: store.phase
+                    phase: store.phase,
+                    preview: store.preview
                 )
 
                 modelButton

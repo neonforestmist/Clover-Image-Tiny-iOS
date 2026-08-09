@@ -97,6 +97,35 @@ struct GenerationSettingsSheet: View {
                 }
 
                 Section {
+                    Toggle(isOn: $settings.livePreviewEnabled) {
+                        Label("Live Step Previews", systemImage: "photo.on.rectangle.angled")
+                    }
+                    .accessibilityIdentifier("live-preview-toggle")
+
+                    Stepper(
+                        previewIntervalTitle,
+                        value: previewIntervalBinding,
+                        in: 1...previewIntervalLimit
+                    )
+                    .disabled(!settings.livePreviewEnabled)
+                    .accessibilityIdentifier("preview-interval-stepper")
+
+                    Slider(
+                        value: previewIntervalSliderBinding,
+                        in: 1...Double(previewIntervalLimit),
+                        step: 1
+                    )
+                    .disabled(!settings.livePreviewEnabled)
+                    .accessibilityLabel("Preview interval")
+                    .accessibilityValue(previewIntervalTitle)
+                    .accessibilityIdentifier("preview-interval-slider")
+                } header: {
+                    Text("Progress Preview")
+                } footer: {
+                    Text("Previews are decoded in memory and never saved. More frequent previews can make generation slower and use more battery.")
+                }
+
+                Section {
                     Picker("Compute", selection: $settings.computeTarget) {
                         ForEach(GenerationSettings.ComputeTarget.allCases) { target in
                             Label(target.title, systemImage: target.systemImage)
@@ -130,5 +159,37 @@ struct GenerationSettingsSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private var previewIntervalLimit: Int {
+        max(settings.stepCount, 1)
+    }
+
+    private var previewIntervalTitle: String {
+        let interval = min(settings.previewInterval, previewIntervalLimit)
+        return "Every \(interval) \(interval == 1 ? "step" : "steps")"
+    }
+
+    private var previewIntervalBinding: Binding<Int> {
+        Binding(
+            get: {
+                min(max(settings.previewInterval, 1), previewIntervalLimit)
+            },
+            set: {
+                settings.previewInterval = min(
+                    max($0, 1),
+                    previewIntervalLimit
+                )
+            }
+        )
+    }
+
+    private var previewIntervalSliderBinding: Binding<Double> {
+        Binding(
+            get: { Double(previewIntervalBinding.wrappedValue) },
+            set: {
+                previewIntervalBinding.wrappedValue = Int($0.rounded())
+            }
+        )
     }
 }

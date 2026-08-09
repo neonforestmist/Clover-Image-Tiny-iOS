@@ -16,6 +16,7 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 - Apple-style SwiftUI interface for iPhone and iPad
 - Prompt and negative-prompt controls
 - 4–100 inference steps with both a slider and precise stepper
+- Optional in-memory progress previews at a user-selected step interval
 - Guidance from 1.0–20.0
 - Reproducible seeds with seed randomization
 - One to four images per generation
@@ -80,6 +81,11 @@ After installation, prompts and generated images stay on the device. Network
 access is used to refresh the catalog and download model files from Hugging
 Face.
 
+Live Step Previews can decode the current denoising latent after every chosen
+number of steps. The app keeps only the current preview in memory; previews do
+not enter the artwork library or get written to disk. Decoding more often can
+increase generation time, memory pressure, and battery use.
+
 The stateful U-Net uses a batch-one input and runs classifier-free guidance in
 two serial passes, cutting the largest activation peak roughly in half. It runs
 with CPU and GPU compute because its mutable style buffers are not
@@ -87,6 +93,11 @@ execution-planned reliably on the Neural Engine. Other pipeline components
 still honor the selected compute preference. Validate real generation on an
 iPhone or iPad; the Simulator is suitable for UI testing. The first generation
 may take longer while Core ML compiles and caches its graphs.
+
+The current Core ML U-Net exposes one rank-16 mutable LoRA state, so Clover
+applies one style per generation. Combining arbitrary rank-16 styles exactly
+can require rank 32; supporting that safely needs a new rank-expanded Core ML
+base export and catalog format rather than simply adding two adapter states.
 
 ## Project structure
 

@@ -225,6 +225,27 @@ final class GenerationSettingsTests: XCTestCase {
         )
 
         XCTAssertEqual(settings.modelID, "base")
+        XCTAssertFalse(settings.livePreviewEnabled)
+        XCTAssertEqual(settings.previewInterval, 5)
+    }
+
+    func testLivePreviewSettingsDecodeAndClampInvalidInterval() throws {
+        let data = Data(
+            """
+            {
+              "livePreviewEnabled": true,
+              "previewInterval": 0
+            }
+            """.utf8
+        )
+
+        let settings = try JSONDecoder().decode(
+            GenerationSettings.self,
+            from: data
+        )
+
+        XCTAssertTrue(settings.livePreviewEnabled)
+        XCTAssertEqual(settings.previewInterval, 1)
     }
 
     func testPreviouslySavedAspectRatioFieldsAreIgnored() throws {

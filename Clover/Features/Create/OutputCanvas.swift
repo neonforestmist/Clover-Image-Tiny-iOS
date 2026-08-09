@@ -3,12 +3,15 @@ import SwiftUI
 struct OutputCanvas: View {
     let artworks: [Artwork]
     let phase: GenerationStore.Phase
+    let preview: GenerationPreview?
 
     @State private var selection = 0
 
     var body: some View {
         Group {
-            if artworks.isEmpty {
+            if let preview, phase.isWorking {
+                previewImage(preview)
+            } else if artworks.isEmpty {
                 emptyState
             } else {
                 artworkPager
@@ -48,16 +51,43 @@ struct OutputCanvas: View {
         .tabViewStyle(.page(indexDisplayMode: artworks.count > 1 ? .always : .never))
     }
 
-    private var loadingOverlay: some View {
-        ZStack {
-            Rectangle()
-                .fill(.ultraThinMaterial)
+    private func previewImage(_ preview: GenerationPreview) -> some View {
+        Image(decorative: preview.cgImage, scale: 1)
+            .resizable()
+            .scaledToFit()
+            .accessibilityLabel(
+                "Generation preview, image \(preview.imageIndex + 1), step \(preview.step) of \(preview.stepCount)"
+            )
+            .accessibilityIdentifier("generation-preview")
+    }
 
-            VStack(spacing: 12) {
-                ProgressView()
-                    .controlSize(.large)
-                Text(phase == .preparing ? "Preparing model…" : "Creating locally…")
-                    .font(.subheadline.weight(.medium))
+    private var loadingOverlay: some View {
+        Group {
+            if let preview {
+                VStack {
+                    Spacer()
+                    Label(
+                        "Image \(preview.imageIndex + 1) · Step \(preview.step) of \(preview.stepCount)",
+                        systemImage: "sparkles"
+                    )
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: .capsule)
+                    .padding()
+                }
+            } else {
+                ZStack {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text(phase == .preparing ? "Preparing model…" : "Creating locally…")
+                            .font(.subheadline.weight(.medium))
+                    }
+                }
             }
         }
         .clipShape(.rect(cornerRadius: 22))

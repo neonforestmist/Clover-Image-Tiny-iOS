@@ -40,6 +40,13 @@ final class CloverUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(seed.waitForExistence(timeout: 3))
+
+        let livePreview = app.switches["live-preview-toggle"]
+        for _ in 0..<3 where !livePreview.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(livePreview.waitForExistence(timeout: 3))
+        livePreview.tap()
         app.buttons["Done"].tap()
 
         let prompt = app.textViews["prompt-field"]
