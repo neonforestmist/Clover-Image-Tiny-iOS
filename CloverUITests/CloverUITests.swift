@@ -76,6 +76,7 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Image"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.sliders["artwork-timeline-slider"].exists)
         XCTAssertTrue(app.staticTexts["Step 30 of 30"].exists)
+        XCTAssertTrue(app.buttons["download-steps-zip"].exists)
     }
 
     @MainActor

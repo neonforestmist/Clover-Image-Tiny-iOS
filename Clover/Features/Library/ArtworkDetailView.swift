@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ArtworkDetailView: View {
     let artwork: Artwork
@@ -7,6 +8,8 @@ struct ArtworkDetailView: View {
     @State private var saveError: String?
     @State private var savedToPhotos = false
     @State private var frameSelection: Int
+    @State private var archiveDocument = ArtworkArchiveDocument()
+    @State private var isExportingArchive = false
 
     init(artwork: Artwork, library: ArtworkLibrary) {
         self.artwork = artwork
@@ -37,6 +40,20 @@ struct ArtworkDetailView: View {
         .environment(library)
         .navigationTitle("Image")
         .navigationBarTitleDisplayMode(.inline)
+        .fileExporter(
+            isPresented: $isExportingArchive,
+            document: archiveDocument,
+            contentType: .zip,
+            defaultFilename: "Clover-Steps-\(artwork.id.uuidString.prefix(8)).zip"
+        ) { result in
+            if case let .failure(error) = result {
+                let cocoaError = error as NSError
+                if cocoaError.domain != NSCocoaErrorDomain
+                    || cocoaError.code != NSUserCancelledError {
+                    saveError = error.localizedDescription
+                }
+            }
+        }
         .alert(
             savedToPhotos ? "Saved to Photos" : "Couldn’t Save",
             isPresented: Binding(
@@ -58,25 +75,38 @@ struct ArtworkDetailView: View {
     }
 
     private var actions: some View {
-        HStack {
-            ShareLink(
-                item: library.frameURL(
-                    for: artwork,
-                    at: frameSelection
-                )
-            ) {
-                Label("Share", systemImage: "square.and.arrow.up")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
+        VStack(spacing: 12) {
+            HStack {
+                ShareLink(
+                    item: library.frameURL(
+                        for: artwork,
+                        at: frameSelection
+                    )
+                ) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
 
-            Button {
-                saveToPhotoLibrary()
-            } label: {
-                Label("Save", systemImage: "square.and.arrow.down")
-                    .frame(maxWidth: .infinity)
+                Button {
+                    saveToPhotoLibrary()
+                } label: {
+                    Label("Save", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
+
+            if !library.previewFrames(for: artwork).isEmpty {
+                Button {
+                    exportStepsArchive()
+                } label: {
+                    Label("Download Steps as ZIP", systemImage: "arrow.down.doc")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("download-steps-zip")
+            }
         }
     }
 
@@ -130,5 +160,37 @@ struct ArtworkDetailView: View {
                 HapticManager.error()
             }
         }
+    }
+
+    private func exportStepsArchive() {
+        do {
+            archiveDocument = ArtworkArchiveDocument(
+                data: try library.stepsArchiveData(for: artwork)
+            )
+            isExportingArchive = true
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+}
+
+private struct ArtworkArchiveDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.zip] }
+
+    var data: Data
+
+    init(data: Data = Data()) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        self.data = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }

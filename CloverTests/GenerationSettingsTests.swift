@@ -345,6 +345,14 @@ final class GenerationSettingsTests: XCTestCase {
         )
         XCTAssertEqual(library.frameStep(for: artwork, at: 2), 15)
 
+        let archive = try library.stepsArchiveData(for: artwork)
+        XCTAssertNotNil(archive.range(of: Data("step-0005.jpg".utf8)))
+        XCTAssertNotNil(archive.range(of: Data("step-0010.jpg".utf8)))
+        XCTAssertNotNil(
+            archive.range(of: Data("step-0015-final.png".utf8))
+        )
+        XCTAssertNil(archive.range(of: Data("step-0015.jpg".utf8)))
+
         library.delete(artwork)
         XCTAssertTrue(library.artworks.isEmpty)
         XCTAssertFalse(
@@ -402,6 +410,35 @@ final class GenerationSettingsTests: XCTestCase {
                 updateStep: 8,
                 requestedStepCount: 8
             )
+        )
+    }
+
+    func testStoredZIPArchiveUsesStandardHeadersAndChecksums() throws {
+        let archive = try StoredZIPArchive.data(
+            entries: [
+                .init(
+                    name: "step-0001.jpg",
+                    data: Data("123456789".utf8)
+                ),
+                .init(
+                    name: "step-0002-final.png",
+                    data: Data("final".utf8)
+                ),
+            ]
+        )
+
+        XCTAssertEqual(
+            StoredZIPArchive.crc32(Data("123456789".utf8)),
+            0xCBF4_3926
+        )
+        XCTAssertEqual(Array(archive.prefix(4)), [0x50, 0x4B, 0x03, 0x04])
+        XCTAssertEqual(
+            Array(archive.suffix(22).prefix(4)),
+            [0x50, 0x4B, 0x05, 0x06]
+        )
+        XCTAssertNotNil(archive.range(of: Data("step-0001.jpg".utf8)))
+        XCTAssertNotNil(
+            archive.range(of: Data("step-0002-final.png".utf8))
         )
     }
 

@@ -88,8 +88,10 @@ iPhone; the finished image still uses the full VAE decoder. Preview frames are
 stored as compressed JPEGs inside the finished artwork's folder. The Library
 still shows one tile per final image; opening that image—or using the controls
 below the newest Create output—reveals a slider for scrubbing through the saved
-steps. Share and Save operate on the currently selected frame. More frequent
-previews still increase generation time, storage use, and battery use.
+steps. Share and Save operate on the currently selected frame. The Library
+detail screen can also download the complete timeline as a ZIP containing each
+saved preview and the full-resolution final step. More frequent previews still
+increase generation time, storage use, and battery use.
 
 The stateful U-Net uses a batch-one input and runs classifier-free guidance in
 two serial passes, cutting the largest activation peak roughly in half. It runs

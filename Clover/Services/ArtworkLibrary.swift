@@ -176,6 +176,26 @@ final class ArtworkLibrary {
         return previews[index].step
     }
 
+    func stepsArchiveData(for artwork: Artwork) throws -> Data {
+        var entries = try previewFrames(for: artwork).map { frame in
+            StoredZIPArchive.Entry(
+                name: String(format: "step-%04d.jpg", frame.step),
+                data: try Data(contentsOf: previewURL(for: artwork, frame: frame))
+            )
+        }
+
+        entries.append(
+            StoredZIPArchive.Entry(
+                name: String(
+                    format: "step-%04d-final.png",
+                    artwork.generation.stepCount
+                ),
+                data: try Data(contentsOf: imageURL(for: artwork))
+            )
+        )
+        return try StoredZIPArchive.data(entries: entries)
+    }
+
     private func persistPreviewFrames(
         _ frames: [GeneratedPreviewFrame],
         forImageIndex imageIndex: Int,
@@ -239,6 +259,152 @@ final class ArtworkLibrary {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(artworks).write(to: indexURL, options: .atomic)
+    }
+}
+
+enum StoredZIPArchive {
+    struct Entry {
+        let name: String
+        let data: Data
+    }
+
+    enum ArchiveError: LocalizedError {
+        case invalidEntry
+        case archiveTooLarge
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidEntry:
+                "A generation frame couldn’t be added to the ZIP."
+            case .archiveTooLarge:
+                "The generation timeline is too large to export as one ZIP."
+            }
+        }
+    }
+
+    private struct DirectoryEntry {
+        let name: Data
+        let checksum: UInt32
+        let size: UInt32
+        let offset: UInt32
+    }
+
+    static func data(entries: [Entry]) throws -> Data {
+        guard entries.count <= Int(UInt16.max) else {
+            throw ArchiveError.archiveTooLarge
+        }
+
+        var archive = Data()
+        var directoryEntries: [DirectoryEntry] = []
+        directoryEntries.reserveCapacity(entries.count)
+
+        for entry in entries {
+            guard let name = entry.name.data(using: .utf8),
+                  !name.isEmpty,
+                  name.count <= Int(UInt16.max),
+                  entry.data.count <= Int(UInt32.max),
+                  archive.count <= Int(UInt32.max) else {
+                throw ArchiveError.invalidEntry
+            }
+
+            let size = UInt32(entry.data.count)
+            let checksum = crc32(entry.data)
+            let offset = UInt32(archive.count)
+
+            archive.appendLittleEndian(UInt32(0x0403_4B50))
+            archive.appendLittleEndian(UInt16(20))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0x0021))
+            archive.appendLittleEndian(checksum)
+            archive.appendLittleEndian(size)
+            archive.appendLittleEndian(size)
+            archive.appendLittleEndian(UInt16(name.count))
+            archive.appendLittleEndian(UInt16(0))
+            archive.append(name)
+            archive.append(entry.data)
+
+            directoryEntries.append(
+                DirectoryEntry(
+                    name: name,
+                    checksum: checksum,
+                    size: size,
+                    offset: offset
+                )
+            )
+        }
+
+        guard archive.count <= Int(UInt32.max) else {
+            throw ArchiveError.archiveTooLarge
+        }
+        let directoryOffset = UInt32(archive.count)
+
+        for entry in directoryEntries {
+            archive.appendLittleEndian(UInt32(0x0201_4B50))
+            archive.appendLittleEndian(UInt16(20))
+            archive.appendLittleEndian(UInt16(20))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0x0021))
+            archive.appendLittleEndian(entry.checksum)
+            archive.appendLittleEndian(entry.size)
+            archive.appendLittleEndian(entry.size)
+            archive.appendLittleEndian(UInt16(entry.name.count))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt32(0))
+            archive.appendLittleEndian(entry.offset)
+            archive.append(entry.name)
+        }
+
+        let directorySize = archive.count - Int(directoryOffset)
+        guard directorySize <= Int(UInt32.max),
+              archive.count <= Int(UInt32.max) else {
+            throw ArchiveError.archiveTooLarge
+        }
+
+        let entryCount = UInt16(directoryEntries.count)
+        archive.appendLittleEndian(UInt32(0x0605_4B50))
+        archive.appendLittleEndian(UInt16(0))
+        archive.appendLittleEndian(UInt16(0))
+        archive.appendLittleEndian(entryCount)
+        archive.appendLittleEndian(entryCount)
+        archive.appendLittleEndian(UInt32(directorySize))
+        archive.appendLittleEndian(directoryOffset)
+        archive.appendLittleEndian(UInt16(0))
+        return archive
+    }
+
+    static func crc32(_ data: Data) -> UInt32 {
+        var checksum = UInt32.max
+        for byte in data {
+            let index = Int((checksum ^ UInt32(byte)) & 0xFF)
+            checksum = checksumTable[index] ^ (checksum >> 8)
+        }
+        return checksum ^ UInt32.max
+    }
+
+    private static let checksumTable: [UInt32] = (0..<256).map { value in
+        var checksum = UInt32(value)
+        for _ in 0..<8 {
+            checksum = checksum & 1 == 1
+                ? (checksum >> 1) ^ 0xEDB8_8320
+                : checksum >> 1
+        }
+        return checksum
+    }
+}
+
+private extension Data {
+    mutating func appendLittleEndian<Value: FixedWidthInteger>(_ value: Value) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) {
+            append(contentsOf: $0)
+        }
     }
 }
 
