@@ -107,6 +107,33 @@ final class CloverUITests: XCTestCase {
         }
         app.buttons["Done"].tap()
 
+        let parameters = app.buttons["parameters-button"]
+        XCTAssertTrue(parameters.waitForExistence(timeout: 5))
+        parameters.tap()
+
+        let steps = app.sliders["steps-slider"]
+        XCTAssertTrue(steps.waitForExistence(timeout: 5))
+        steps.adjust(toNormalizedSliderPosition: 0)
+
+        let livePreview = app.switches["live-preview-toggle"]
+        for _ in 0..<4 where !livePreview.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(livePreview.waitForExistence(timeout: 5))
+        if livePreview.value as? String == "0" {
+            livePreview.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)
+            ).tap()
+        }
+
+        let previewInterval = app.sliders["preview-interval-slider"]
+        for _ in 0..<3 where !previewInterval.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(previewInterval.waitForExistence(timeout: 5))
+        previewInterval.adjust(toNormalizedSliderPosition: 0)
+        app.buttons["Done"].tap()
+
         let generate = app.buttons["generate-button"]
         XCTAssertTrue(generate.waitForExistence(timeout: 5))
         XCTAssertTrue(generate.isEnabled)

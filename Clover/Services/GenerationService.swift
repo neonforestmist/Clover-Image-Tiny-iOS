@@ -35,7 +35,7 @@ struct GenerationUpdate: @unchecked Sendable {
 
 enum GenerationError: LocalizedError {
     case missingResources
-    case noSafeImages
+    case noImages
     case modelExecutionPlan
     case cancelled
 
@@ -43,8 +43,8 @@ enum GenerationError: LocalizedError {
         switch self {
         case .missingResources:
             "The Core ML resources are missing from this build."
-        case .noSafeImages:
-            "The safety checker did not return an image."
+        case .noImages:
+            "Clover couldn’t produce an image. Try generating again."
         case .modelExecutionPlan:
             "Clover couldn’t start its Core ML model. Restart the app and try again. If it continues, remove and download Clover again."
         case .cancelled:
@@ -54,8 +54,13 @@ enum GenerationError: LocalizedError {
 
     static func presenting(_ error: Error) -> Error {
         let coreMLError = error as NSError
+        let description = coreMLError.localizedDescription
+        if coreMLError.domain.localizedCaseInsensitiveContains("safety")
+            || description.localizedCaseInsensitiveContains("safety check") {
+            return GenerationError.noImages
+        }
         guard coreMLError.domain == "com.apple.CoreML",
-              coreMLError.localizedDescription.localizedCaseInsensitiveContains(
+              description.localizedCaseInsensitiveContains(
                 "execution plan"
               ) else {
             return error
@@ -214,32 +219,36 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                     let shouldPreview = settings.livePreviewEnabled
                         && (completedStep.isMultiple(of: previewInterval)
                             || completedStep == stepCount)
-                    var preview: GenerationPreview?
-                    if shouldPreview,
-                       let decoded = try? update.pipeline.decodeToImages(
-                           update.currentLatentSamples,
-                           configuration: update.configuration
-                       ),
-                       let image = decoded.compactMap({ $0 }).first {
-                        preview = GenerationPreview(
+                    let renderedPreview = shouldPreview
+                        ? autoreleasepool {
+                            LatentPreviewRenderer.render(
+                                update.currentLatentSamples.first
+                            )
+                        }
+                        : nil
+                    let preview = renderedPreview.map { image in
+                        GenerationPreview(
                             cgImage: image,
                             step: completedStep,
                             stepCount: stepCount,
                             imageIndex: imageIndex
                         )
-                        if completedStep < stepCount,
-                           let jpegData = UIImage(cgImage: image).jpegData(
-                               compressionQuality: 0.86
-                           ) {
-                            storedPreviews.append(
-                                GeneratedPreviewFrame(
-                                    jpegData: jpegData,
-                                    step: completedStep,
-                                    stepCount: stepCount,
-                                    imageIndex: imageIndex
-                                )
+                    }
+                    if completedStep < stepCount,
+                       let renderedPreview,
+                       let jpegData = autoreleasepool(invoking: {
+                           UIImage(cgImage: renderedPreview).jpegData(
+                               compressionQuality: 0.82
+                           )
+                       }) {
+                        storedPreviews.append(
+                            GeneratedPreviewFrame(
+                                jpegData: jpegData,
+                                step: completedStep,
+                                stepCount: stepCount,
+                                imageIndex: imageIndex
                             )
-                        }
+                        )
                     }
                     progress(
                         GenerationUpdate(
@@ -267,7 +276,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
         }
 
         guard !images.isEmpty else {
-            throw GenerationError.noSafeImages
+            throw GenerationError.noImages
         }
         progress(GenerationUpdate(progress: 1, preview: nil))
         let safeImageIndices = Set(images.map(\.imageIndex))
@@ -277,6 +286,109 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                 safeImageIndices.contains($0.imageIndex)
             }
         )
+    }
+}
+
+/// Produces an inexpensive approximation directly from the four-channel
+/// Stable Diffusion latent. This deliberately avoids loading the VAE decoder
+/// (and safety checker) while the U-Net is resident on memory-constrained
+/// iPhones. The full-resolution final image still uses the model decoder.
+enum LatentPreviewRenderer {
+    private static let rgbFactors: [[Float32]] = [
+        [0.298, 0.207, 0.208],
+        [0.187, 0.286, 0.173],
+        [-0.158, 0.189, 0.264],
+        [-0.184, -0.271, -0.473],
+    ]
+
+    static func render(
+        _ latent: MLShapedArray<Float32>?
+    ) -> CGImage? {
+        guard let latent,
+              latent.shape.count >= 3 else { return nil }
+
+        let shape = latent.shape
+        let width = shape[shape.count - 1]
+        let height = shape[shape.count - 2]
+        let channels = shape[shape.count - 3]
+        guard width > 0,
+              height > 0,
+              channels >= rgbFactors.count else { return nil }
+
+        let planeSize = width * height
+        let scalars = latent.scalars
+        guard scalars.count >= planeSize * channels else { return nil }
+
+        var pixels = [UInt8](repeating: 255, count: planeSize * 4)
+        for pixelIndex in 0..<planeSize {
+            var red: Float32 = 0
+            var green: Float32 = 0
+            var blue: Float32 = 0
+            for channel in 0..<rgbFactors.count {
+                let value = scalars[channel * planeSize + pixelIndex]
+                red += value * rgbFactors[channel][0]
+                green += value * rgbFactors[channel][1]
+                blue += value * rgbFactors[channel][2]
+            }
+
+            let outputIndex = pixelIndex * 4
+            pixels[outputIndex] = componentByte(red)
+            pixels[outputIndex + 1] = componentByte(green)
+            pixels[outputIndex + 2] = componentByte(blue)
+        }
+
+        guard let provider = CGDataProvider(
+            data: Data(pixels) as CFData
+        ),
+        let smallImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(
+                rawValue: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder32Big.rawValue
+            ),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        ) else {
+            return nil
+        }
+
+        let scale = max(1, 512 / max(width, height))
+        let scaledWidth = width * scale
+        let scaledHeight = height * scale
+        guard let context = CGContext(
+            data: nil,
+            width: scaledWidth,
+            height: scaledHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: scaledWidth * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return smallImage
+        }
+        context.interpolationQuality = .high
+        context.draw(
+            smallImage,
+            in: CGRect(
+                x: 0,
+                y: 0,
+                width: scaledWidth,
+                height: scaledHeight
+            )
+        )
+        return context.makeImage() ?? smallImage
+    }
+
+    private static func componentByte(_ value: Float32) -> UInt8 {
+        let normalized = (tanh(value) + 1) * 0.5
+        return UInt8(max(0, min(255, Int(normalized * 255))))
     }
 }
 

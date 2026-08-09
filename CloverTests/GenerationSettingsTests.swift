@@ -364,6 +364,49 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertTrue(result.previewFrames.allSatisfy { !$0.jpegData.isEmpty })
     }
 
+    func testLatentPreviewRendererCreatesDisplaySizedImage() throws {
+        let latent = MLShapedArray<Float32>(
+            repeating: 0.25,
+            shape: [1, 4, 8, 8]
+        )
+
+        let image = try XCTUnwrap(LatentPreviewRenderer.render(latent))
+
+        XCTAssertEqual(image.width, 512)
+        XCTAssertEqual(image.height, 512)
+    }
+
+    func testLatentPreviewRendererRejectsUnsupportedShape() {
+        let latent = MLShapedArray<Float32>(
+            repeating: 0,
+            shape: [1, 3, 8, 8]
+        )
+
+        XCTAssertNil(LatentPreviewRenderer.render(latent))
+    }
+
+    func testEmptyGenerationMessageDoesNotExposeSafetyChecker() {
+        let message = GenerationError.noImages.localizedDescription
+
+        XCTAssertFalse(message.localizedCaseInsensitiveContains("safety"))
+        XCTAssertTrue(message.localizedCaseInsensitiveContains("try"))
+    }
+
+    func testSafetyCheckerFailureIsPresentedAsGenericGenerationError() {
+        let internalError = NSError(
+            domain: "com.apple.CoreML",
+            code: 1,
+            userInfo: [
+                NSLocalizedDescriptionKey: "The safety checker failed.",
+            ]
+        )
+
+        let message = GenerationError.presenting(internalError).localizedDescription
+
+        XCTAssertEqual(message, GenerationError.noImages.localizedDescription)
+        XCTAssertFalse(message.localizedCaseInsensitiveContains("safety"))
+    }
+
     func testPreviouslySavedAspectRatioFieldsAreIgnored() throws {
         let data = Data(
             """

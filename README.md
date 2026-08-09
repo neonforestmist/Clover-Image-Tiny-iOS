@@ -81,13 +81,15 @@ After installation, prompts and generated images stay on the device. Network
 access is used to refresh the catalog and download model files from Hugging
 Face.
 
-Live Step Previews can decode the current denoising latent every 1–10 steps.
-Preview frames are stored as compressed JPEGs inside the finished artwork's
-folder. The Library still shows one tile per final image; opening that image—or
-using the controls below the newest Create output—reveals a slider for
-scrubbing through the saved steps. Share and Save operate on the currently
-selected frame. Decoding more often increases generation time, storage use,
-and battery use.
+Live Step Previews render a lightweight RGB approximation directly from the
+current denoising latent every 1–10 steps. This keeps the VAE decoder and safety
+checker out of the denoising loop, avoiding repeated Core ML memory spikes on
+iPhone; the finished image still uses the full VAE decoder. Preview frames are
+stored as compressed JPEGs inside the finished artwork's folder. The Library
+still shows one tile per final image; opening that image—or using the controls
+below the newest Create output—reveals a slider for scrubbing through the saved
+steps. Share and Save operate on the currently selected frame. More frequent
+previews still increase generation time, storage use, and battery use.
 
 The stateful U-Net uses a batch-one input and runs classifier-free guidance in
 two serial passes, cutting the largest activation peak roughly in half. It runs
