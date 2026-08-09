@@ -16,6 +16,7 @@ struct GenerationSettingsSheet: View {
                         )
                         .accessibilityIdentifier("steps-stepper")
 
+                        // Keep integer values without discrete slider tick haptics.
                         Slider(
                             value: Binding(
                                 get: { Double(settings.stepCount) },
@@ -23,8 +24,7 @@ struct GenerationSettingsSheet: View {
                                     settings.stepCount = Int($0.rounded())
                                 }
                             ),
-                            in: 4...100,
-                            step: 1
+                            in: 4...100
                         )
                         .accessibilityLabel("Inference steps")
                         .accessibilityValue("\(settings.stepCount)")
@@ -110,10 +110,10 @@ struct GenerationSettingsSheet: View {
                     .disabled(!settings.livePreviewEnabled)
                     .accessibilityIdentifier("preview-interval-stepper")
 
+                    // Keep integer values without discrete slider tick haptics.
                     Slider(
                         value: previewIntervalSliderBinding,
-                        in: 1...Double(previewIntervalLimit),
-                        step: 1
+                        in: 1...Double(previewIntervalLimit)
                     )
                     .disabled(!settings.livePreviewEnabled)
                     .accessibilityLabel("Preview interval")

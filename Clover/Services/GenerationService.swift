@@ -205,20 +205,32 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                 try pipeline.generateImages(
                     configuration: configuration
                 ) { update in
-                    let stepCount = max(update.stepCount, 1)
-                    let completedStep = min(update.step + 1, stepCount)
-                    let imageProgress = Double(completedStep)
-                        / Double(stepCount)
+                    let requestedStepCount = max(settings.stepCount, 1)
+                    let schedulerStepCount = max(update.stepCount, 1)
+                    let schedulerStep = min(
+                        max(update.step + 1, 1),
+                        schedulerStepCount
+                    )
+                    let completedStep = GenerationStepMapper.visibleStep(
+                        updateStep: update.step,
+                        requestedStepCount: requestedStepCount
+                    )
+                    let imageProgress = Double(schedulerStep)
+                        / Double(schedulerStepCount)
                     let totalProgress = (
                         Double(imageIndex) + imageProgress
                     ) / Double(imageCount)
                     let previewInterval = min(
                         min(max(settings.previewInterval, 1), 10),
-                        stepCount
+                        requestedStepCount
                     )
                     let shouldPreview = settings.livePreviewEnabled
+                        && GenerationStepMapper.representsRequestedStep(
+                            updateStep: update.step,
+                            requestedStepCount: requestedStepCount
+                        )
                         && (completedStep.isMultiple(of: previewInterval)
-                            || completedStep == stepCount)
+                            || completedStep == requestedStepCount)
                     let renderedPreview = shouldPreview
                         ? autoreleasepool {
                             LatentPreviewRenderer.render(
@@ -230,11 +242,11 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                         GenerationPreview(
                             cgImage: image,
                             step: completedStep,
-                            stepCount: stepCount,
+                            stepCount: requestedStepCount,
                             imageIndex: imageIndex
                         )
                     }
-                    if completedStep < stepCount,
+                    if completedStep < requestedStepCount,
                        let renderedPreview,
                        let jpegData = autoreleasepool(invoking: {
                            UIImage(cgImage: renderedPreview).jpegData(
@@ -245,7 +257,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                             GeneratedPreviewFrame(
                                 jpegData: jpegData,
                                 step: completedStep,
-                                stepCount: stepCount,
+                                stepCount: requestedStepCount,
                                 imageIndex: imageIndex
                             )
                         )
@@ -286,6 +298,22 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                 safeImageIndices.contains($0.imageIndex)
             }
         )
+    }
+}
+
+enum GenerationStepMapper {
+    static func visibleStep(
+        updateStep: Int,
+        requestedStepCount: Int
+    ) -> Int {
+        min(max(updateStep + 1, 1), max(requestedStepCount, 1))
+    }
+
+    static func representsRequestedStep(
+        updateStep: Int,
+        requestedStepCount: Int
+    ) -> Bool {
+        updateStep < max(requestedStepCount, 1)
     }
 }
 

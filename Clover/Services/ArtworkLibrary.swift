@@ -122,9 +122,11 @@ final class ArtworkLibrary {
     func previewFrames(for artwork: Artwork) -> [ArtworkPreviewFrame] {
         artwork.previewFrames
             .filter {
-                fileManager.fileExists(
-                    atPath: previewURL(for: artwork, frame: $0).path
-                )
+                $0.step > 0
+                    && $0.step < artwork.generation.stepCount
+                    && fileManager.fileExists(
+                        atPath: previewURL(for: artwork, frame: $0).path
+                    )
             }
             .sorted { lhs, rhs in
                 if lhs.step == rhs.step {

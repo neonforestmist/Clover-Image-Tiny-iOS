@@ -73,9 +73,7 @@ struct ArtworkTimelineControls: View {
             VStack(spacing: 10) {
                 HStack(spacing: 12) {
                     Label(
-                        selectedIndex == finalIndex
-                            ? "Final image"
-                            : "Step \(selectedStep) of \(artwork.generation.stepCount)",
+                        "Step \(selectedStep) of \(artwork.generation.stepCount)",
                         systemImage: selectedIndex == finalIndex
                             ? "checkmark.circle.fill"
                             : "circle.dotted"
@@ -105,19 +103,17 @@ struct ArtworkTimelineControls: View {
                     }
                 }
 
+                // Round a continuous slider so scrubbing never emits tick haptics.
                 Slider(
                     value: Binding(
                         get: { Double(selectedIndex) },
                         set: { selection = Int($0.rounded()) }
                     ),
-                    in: 0...Double(finalIndex),
-                    step: 1
+                    in: 0...Double(finalIndex)
                 )
                 .accessibilityLabel("Generation timeline")
                 .accessibilityValue(
-                    selectedIndex == finalIndex
-                        ? "Final image"
-                        : "Step \(selectedStep)"
+                    "Step \(selectedStep) of \(artwork.generation.stepCount)"
                 )
                 .accessibilityIdentifier("artwork-timeline-slider")
             }

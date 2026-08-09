@@ -67,6 +67,7 @@ final class CloverUITests: XCTestCase {
             app.sliders["artwork-timeline-slider"]
                 .waitForExistence(timeout: 8)
         )
+        XCTAssertTrue(app.staticTexts["Step 30 of 30"].exists)
 
         app.tabBars.buttons["Library"].tap()
         let artwork = app.buttons["artwork-tile"]
@@ -74,6 +75,7 @@ final class CloverUITests: XCTestCase {
         artwork.tap()
         XCTAssertTrue(app.navigationBars["Image"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.sliders["artwork-timeline-slider"].exists)
+        XCTAssertTrue(app.staticTexts["Step 30 of 30"].exists)
     }
 
     @MainActor

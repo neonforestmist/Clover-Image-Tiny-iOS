@@ -307,6 +307,12 @@ final class GenerationSettingsTests: XCTestCase {
                     stepCount: 15,
                     imageIndex: 0
                 ),
+                GeneratedPreviewFrame(
+                    jpegData: jpegData,
+                    step: 15,
+                    stepCount: 15,
+                    imageIndex: 0
+                ),
             ],
             settings: settings
         )
@@ -337,6 +343,7 @@ final class GenerationSettingsTests: XCTestCase {
             library.frameURL(for: artwork, at: 2),
             library.imageURL(for: artwork)
         )
+        XCTAssertEqual(library.frameStep(for: artwork, at: 2), 15)
 
         library.delete(artwork)
         XCTAssertTrue(library.artworks.isEmpty)
@@ -374,6 +381,28 @@ final class GenerationSettingsTests: XCTestCase {
 
         XCTAssertEqual(image.width, 512)
         XCTAssertEqual(image.height, 512)
+    }
+
+    func testGenerationStepMapperKeepsFinalRequestedStepAtTimelineTail() {
+        XCTAssertEqual(
+            GenerationStepMapper.visibleStep(
+                updateStep: 7,
+                requestedStepCount: 8
+            ),
+            8
+        )
+        XCTAssertTrue(
+            GenerationStepMapper.representsRequestedStep(
+                updateStep: 7,
+                requestedStepCount: 8
+            )
+        )
+        XCTAssertFalse(
+            GenerationStepMapper.representsRequestedStep(
+                updateStep: 8,
+                requestedStepCount: 8
+            )
+        )
     }
 
     func testLatentPreviewRendererRejectsUnsupportedShape() {
