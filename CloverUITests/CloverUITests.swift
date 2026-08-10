@@ -33,7 +33,7 @@ final class CloverUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["Parameters"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.steppers["steps-stepper"].exists)
-        XCTAssertTrue(app.sliders["steps-slider"].exists)
+        XCTAssertTrue(app.otherElements["steps-slider"].exists)
         XCTAssertTrue(app.sliders["guidance-slider"].exists)
         XCTAssertTrue(app.steppers["image-count-stepper"].exists)
         let seed = app.textFields["seed-field"]
@@ -64,7 +64,7 @@ final class CloverUITests: XCTestCase {
         generate.tap()
 
         XCTAssertTrue(
-            app.sliders["artwork-timeline-slider"]
+            app.otherElements["artwork-timeline-slider"]
                 .waitForExistence(timeout: 8)
         )
         XCTAssertTrue(app.staticTexts["Step 30 of 30"].exists)
@@ -74,7 +74,7 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(artwork.waitForExistence(timeout: 8))
         artwork.tap()
         XCTAssertTrue(app.navigationBars["Image"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.sliders["artwork-timeline-slider"].exists)
+        XCTAssertTrue(app.otherElements["artwork-timeline-slider"].exists)
         XCTAssertTrue(app.staticTexts["Step 30 of 30"].exists)
         XCTAssertTrue(app.buttons["download-steps-zip"].exists)
     }
@@ -114,9 +114,11 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(parameters.waitForExistence(timeout: 5))
         parameters.tap()
 
-        let steps = app.sliders["steps-slider"]
+        let steps = app.otherElements["steps-slider"]
         XCTAssertTrue(steps.waitForExistence(timeout: 5))
-        steps.adjust(toNormalizedSliderPosition: 0)
+        steps.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5)
+        ).tap()
 
         let livePreview = app.switches["live-preview-toggle"]
         for _ in 0..<4 where !livePreview.exists {
@@ -129,12 +131,14 @@ final class CloverUITests: XCTestCase {
             ).tap()
         }
 
-        let previewInterval = app.sliders["preview-interval-slider"]
+        let previewInterval = app.otherElements["preview-interval-slider"]
         for _ in 0..<3 where !previewInterval.exists {
             app.swipeUp()
         }
         XCTAssertTrue(previewInterval.waitForExistence(timeout: 5))
-        previewInterval.adjust(toNormalizedSliderPosition: 0)
+        previewInterval.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5)
+        ).tap()
         app.buttons["Done"].tap()
 
         let generate = app.buttons["generate-button"]

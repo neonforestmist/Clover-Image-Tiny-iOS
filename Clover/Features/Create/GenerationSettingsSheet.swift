@@ -16,19 +16,13 @@ struct GenerationSettingsSheet: View {
                         )
                         .accessibilityIdentifier("steps-stepper")
 
-                        // Keep integer values without discrete slider tick haptics.
-                        Slider(
-                            value: Binding(
-                                get: { Double(settings.stepCount) },
-                                set: {
-                                    settings.stepCount = Int($0.rounded())
-                                }
-                            ),
-                            in: 4...100
+                        HapticlessIntegerSlider(
+                            value: $settings.stepCount,
+                            in: 4...100,
+                            accessibilityLabel: "Inference steps",
+                            accessibilityValue: "\(settings.stepCount)",
+                            accessibilityIdentifier: "steps-slider"
                         )
-                        .accessibilityLabel("Inference steps")
-                        .accessibilityValue("\(settings.stepCount)")
-                        .accessibilityIdentifier("steps-slider")
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -110,15 +104,14 @@ struct GenerationSettingsSheet: View {
                     .disabled(!settings.livePreviewEnabled)
                     .accessibilityIdentifier("preview-interval-stepper")
 
-                    // Keep integer values without discrete slider tick haptics.
-                    Slider(
-                        value: previewIntervalSliderBinding,
-                        in: 1...Double(previewIntervalLimit)
+                    HapticlessIntegerSlider(
+                        value: previewIntervalBinding,
+                        in: 1...previewIntervalLimit,
+                        accessibilityLabel: "Preview interval",
+                        accessibilityValue: previewIntervalTitle,
+                        accessibilityIdentifier: "preview-interval-slider"
                     )
                     .disabled(!settings.livePreviewEnabled)
-                    .accessibilityLabel("Preview interval")
-                    .accessibilityValue(previewIntervalTitle)
-                    .accessibilityIdentifier("preview-interval-slider")
                 } header: {
                     Text("Progress Preview")
                 } footer: {
@@ -184,12 +177,4 @@ struct GenerationSettingsSheet: View {
         )
     }
 
-    private var previewIntervalSliderBinding: Binding<Double> {
-        Binding(
-            get: { Double(previewIntervalBinding.wrappedValue) },
-            set: {
-                previewIntervalBinding.wrappedValue = Int($0.rounded())
-            }
-        )
-    }
 }
