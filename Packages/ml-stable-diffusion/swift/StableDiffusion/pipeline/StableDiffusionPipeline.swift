@@ -30,6 +30,7 @@ public enum StableDiffusionRNG {
 public enum PipelineError: String, Swift.Error {
     case missingUnetInputs
     case startingImageProvidedWithoutEncoder
+    case inpaintingRequiresImageAndMask
     case startingText2ImgWithoutTextEncoder
     case unsupportedOSVersion
     case errorCreatingPreview
@@ -250,6 +251,35 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
         // Store denoised latents from scheduler to pass into decoder
         var denoisedLatents: [MLShapedArray<Float32>] = latents.map { MLShapedArray(converting: $0) }
 
+        let inpaintingConditioning: (
+            mask: MLShapedArray<Float32>,
+            maskedImageLatent: MLShapedArray<Float32>
+        )?
+        if config.mode == .inpainting {
+            guard let image = config.maskedImage,
+                  let maskImage = config.inpaintingMask,
+                  let encoder else {
+                throw PipelineError.inpaintingRequiresImageAndMask
+            }
+            var encoderRandom = randomSource(
+                from: config.rngType,
+                seed: config.seed
+            )
+            let maskedImageLatent = try encoder.encode(
+                image,
+                scaleFactor: config.encoderScaleFactor,
+                random: &encoderRandom
+            )
+            let fullResolutionMask = try maskImage.planarMaskShapedArray()
+            let mask = downsampleMask(
+                fullResolutionMask,
+                to: [1, 1, latentSampleShape[2], latentSampleShape[3]]
+            )
+            inpaintingConditioning = (mask, maskedImageLatent)
+        } else {
+            inpaintingConditioning = nil
+        }
+
         if reduceMemory {
             encoder?.unloadResources()
         }
@@ -271,7 +301,9 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
             // Expand the latents for classifier-free guidance
             // and input to the Unet noise prediction model
             let latentUnetInput: [MLShapedArray<Float32>]
-            if config.guidanceScale >= 1.0 {
+            // Batch-one exports, including the inpainting U-Net, run the
+            // unconditional and text-conditioned passes serially below.
+            if config.guidanceScale >= 1.0, latentSampleShape[0] >= 2 {
                 latentUnetInput = latents.map {
                     MLShapedArray<Float32>(concatenating: [$0, $0], alongAxis: 0)
                 }
@@ -279,9 +311,29 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
                 latentUnetInput = latents
             }
 
+            let modelLatentInput: [MLShapedArray<Float32>]
+            if let inpaintingConditioning {
+                modelLatentInput = latentUnetInput.map { latent in
+                    let mask = matchingBatch(
+                        inpaintingConditioning.mask,
+                        batch: latent.shape[0]
+                    )
+                    let maskedImage = matchingBatch(
+                        inpaintingConditioning.maskedImageLatent,
+                        batch: latent.shape[0]
+                    )
+                    return MLShapedArray<Float32>(
+                        concatenating: [latent, mask, maskedImage],
+                        alongAxis: 1
+                    )
+                }
+            } else {
+                modelLatentInput = latentUnetInput
+            }
+
             // Before Unet, execute controlNet and add the output into Unet inputs
             let additionalResiduals = try controlNet?.execute(
-                latents: latentUnetInput,
+                latents: modelLatentInput,
                 timeStep: t,
                 hiddenStates: hiddenStates,
                 images: controlNetConds
@@ -293,7 +345,7 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
             if latentSampleShape[0] >= 2 || config.guidanceScale < 1.0 {
                 // One predict call from the uNet, using batching if needed
                 noise = try unet.predictNoise(
-                  latents: latentUnetInput,
+                  latents: modelLatentInput,
                   timeStep: t,
                   hiddenStates: hiddenStates,
                   additionalResiduals: additionalResiduals
@@ -303,7 +355,7 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
                 var hidden0 = MLShapedArray<Float32>(converting: hiddenStates[0])
                 hidden0 = MLShapedArray(scalars: hidden0.scalars, shape: [1]+hidden0.shape)
                 let noise_pred_uncond = try unet.predictNoise(
-                  latents: latents,
+                  latents: modelLatentInput,
                   timeStep: t,
                   hiddenStates: hidden0,
                   additionalResiduals: additionalResiduals
@@ -312,7 +364,7 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
                 var hidden1 = MLShapedArray<Float32>(converting: hiddenStates[1])
                 hidden1 = MLShapedArray(scalars: hidden1.scalars, shape: [1]+hidden1.shape)
                 let noise_pred_text = try unet.predictNoise(
-                  latents: latents,
+                  latents: modelLatentInput,
                   timeStep: t,
                   hiddenStates: hidden1,
                   additionalResiduals: additionalResiduals
@@ -414,6 +466,49 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
         }
 
         return safeImages
+    }
+
+    private func downsampleMask(
+        _ mask: MLShapedArray<Float32>,
+        to shape: [Int]
+    ) -> MLShapedArray<Float32> {
+        let sourceHeight = mask.shape[2]
+        let sourceWidth = mask.shape[3]
+        let targetHeight = shape[2]
+        let targetWidth = shape[3]
+        var values = [Float32](
+            repeating: 0,
+            count: targetHeight * targetWidth
+        )
+        for y in 0..<targetHeight {
+            let sourceY = min(
+                sourceHeight - 1,
+                (y * sourceHeight) / targetHeight
+            )
+            for x in 0..<targetWidth {
+                let sourceX = min(
+                    sourceWidth - 1,
+                    (x * sourceWidth) / targetWidth
+                )
+                values[y * targetWidth + x] = mask[
+                    scalarAt: 0, 0, sourceY, sourceX
+                ]
+            }
+        }
+        return MLShapedArray(scalars: values, shape: shape)
+    }
+
+    private func matchingBatch(
+        _ value: MLShapedArray<Float32>,
+        batch: Int
+    ) -> MLShapedArray<Float32> {
+        guard value.shape[0] == batch else {
+            return MLShapedArray(
+                concatenating: Array(repeating: value, count: batch),
+                alongAxis: 0
+            )
+        }
+        return value
     }
 
 }

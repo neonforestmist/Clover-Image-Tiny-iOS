@@ -59,6 +59,74 @@ enum CloverPipelineFactory {
         )
     }
 
+    /// Builds the standalone 9-channel inpainting pipeline. Inpainting
+    /// resources intentionally do not use Clover's stateful style adapter
+    /// contract; they contain their own U-Net and VAE encoder.
+    static func makeInpainting(
+        resourcesURL: URL,
+        configuration: MLModelConfiguration
+    ) throws -> StableDiffusionPipeline {
+        let urls = StableDiffusionPipeline.ResourceURLs(
+            resourcesAt: resourcesURL
+        )
+        let hasFullUnet = FileManager.default.fileExists(
+            atPath: urls.unetURL.path
+        )
+        let hasChunkedUnet = FileManager.default.fileExists(
+            atPath: urls.unetChunk1URL.path
+        ) && FileManager.default.fileExists(
+            atPath: urls.unetChunk2URL.path
+        )
+        guard (hasFullUnet || hasChunkedUnet),
+              FileManager.default.fileExists(atPath: urls.encoderURL.path) else {
+            throw CloverPipelineError.incompatibleResources
+        }
+
+        let tokenizer = try BPETokenizer(
+            mergesAt: urls.mergesURL,
+            vocabularyAt: urls.vocabURL
+        )
+        let textEncoder = TextEncoder(
+            tokenizer: tokenizer,
+            modelAt: urls.textEncoderURL,
+            configuration: configuration
+        )
+        let unet: Unet
+        if FileManager.default.fileExists(atPath: urls.unetChunk1URL.path),
+           FileManager.default.fileExists(atPath: urls.unetChunk2URL.path) {
+            unet = Unet(
+                chunksAt: [urls.unetChunk1URL, urls.unetChunk2URL],
+                configuration: configuration
+            )
+        } else {
+            unet = Unet(
+                modelAt: urls.unetURL,
+                configuration: configuration
+            )
+        }
+        let decoder = Decoder(
+            modelAt: urls.decoderURL,
+            configuration: configuration
+        )
+        let encoder = Encoder(
+            modelAt: urls.encoderURL,
+            configuration: configuration
+        )
+        let safetyChecker = makeSafetyChecker(
+            at: urls.safetyCheckerURL,
+            configuration: configuration
+        )
+
+        return StableDiffusionPipeline(
+            textEncoder: textEncoder,
+            unet: unet,
+            decoder: decoder,
+            encoder: encoder,
+            safetyChecker: safetyChecker,
+            reduceMemory: true
+        )
+    }
+
     private static func makeStatefulLoRAPipeline(
         urls: StableDiffusionPipeline.ResourceURLs,
         adapter: LoRAAdapter?,

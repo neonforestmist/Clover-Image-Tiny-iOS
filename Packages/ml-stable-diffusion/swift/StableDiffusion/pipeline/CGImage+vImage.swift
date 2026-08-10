@@ -130,6 +130,17 @@ extension CGImage {
             return shapedArray
     }
 
+    /// Converts a grayscale inpainting mask to [1, 1, H, W] in [0, 1].
+    /// White pixels are the region the U-Net should regenerate.
+    public func planarMaskShapedArray() throws -> MLShapedArray<Float32> {
+        let rgb = try planarRGBShapedArray(minValue: 0.0, maxValue: 1.0)
+        let values = rgb[0][0].scalars
+        return MLShapedArray(
+            scalars: values,
+            shape: [1, 1, self.height, self.width]
+        )
+    }
+
     private func normalizePixelValues(pixel: UInt8) -> Float {
         return (Float(pixel) / 127.5) - 1.0
     }

@@ -75,6 +75,34 @@ Output generation remains 512 × 512. The app can save centered 1:1, 4:5, 5:4,
 9:16, 16:9, and custom width:height crops without downloading additional U-Net
 variants.
 
+## Inpainting resources
+
+Inpainting is a separate, standalone Core ML pipeline because its U-Net has a
+9-channel input and needs a VAE encoder. Download the companion resource
+bundle from
+[`neonforestmist/Clover-Image-Tiny-Inpaint-CoreML`](https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML),
+then place its `Resources` directory in an app-managed model folder. The
+runtime entry point is `CoreMLInpaintingService`:
+
+```swift
+let service = CoreMLInpaintingService()
+var settings = GenerationSettings()
+settings.prompt = "replace the masked area with a tiny glass greenhouse"
+let result = try await service.generate(
+    resourcesURL: modelFolder,
+    request: InpaintingRequest(image: sourceImage, mask: whiteMeansRegenerateMask),
+    settings: settings,
+    cancellation: GenerationCancellationToken(),
+    progress: { _ in }
+)
+```
+
+The service encodes the masked image locally, sends
+`[noisy latent, mask, masked-image latent]` to the batch-one U-Net, and
+composites untouched pixels from the original image. The bundle is converted
+for the SD 1.4-class 512×512 architecture on iOS 18; validate final latency
+and memory on a physical device rather than Simulator.
+
 ## On-device behavior
 
 After installation, prompts and generated images stay on the device. Network

@@ -8,7 +8,7 @@ import CoreGraphics
 public enum PipelineMode {
     case textToImage
     case imageToImage
-    // case inPainting
+    case inpainting
 }
 
 /// Image generation configuration
@@ -20,6 +20,12 @@ public struct PipelineConfiguration: Hashable {
     public var negativePrompt: String = ""
     /// Starting image for image2image or in-painting
     public var startingImage: CGImage? = nil
+    /// Image with the masked region blacked out, used by the 9-channel U-Net.
+    public var maskedImage: CGImage? = nil
+    /// White pixels are regenerated; black pixels are preserved.
+    public var inpaintingMask: CGImage? = nil
+    /// The caller can composite the original outside the mask after decoding.
+    public var preserveUnmaskedRegion: Bool = true
     /// Fraction of inference steps to be used in `.imageToImage` pipeline mode
     /// Must be between 0 and 1
     /// Higher values will result in greater transformation of the `startingImage`
@@ -73,6 +79,9 @@ public struct PipelineConfiguration: Hashable {
     public var mode: PipelineMode {
         guard startingImage != nil else {
             return .textToImage
+        }
+        if maskedImage != nil, inpaintingMask != nil {
+            return .inpainting
         }
         guard strength < 1.0 else {
             return .textToImage
