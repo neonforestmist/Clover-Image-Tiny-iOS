@@ -10,10 +10,8 @@ struct InpaintingView: View {
     @State private var sourceImage: CGImage?
     @State private var resultImage: CGImage?
     @State private var strokes: [MaskStroke] = []
-    @State private var prompt = ""
-    @State private var stepCount = 30
-    @State private var guidanceScale = 7.5
-    @State private var seed: UInt32 = 1337
+    @State private var settings = GenerationSettings()
+    @State private var presentedSheet: InpaintingSheet?
     @State private var isWorking = false
     @State private var progress = 0.0
     @State private var errorMessage: String?
@@ -21,6 +19,20 @@ struct InpaintingView: View {
     @State private var generationTask: Task<Void, Never>?
 
     private let service = CoreMLInpaintingService()
+
+    private enum InpaintingSheet: Identifiable {
+        case settings
+        case crop(InpaintingCropSource)
+
+        var id: String {
+            switch self {
+            case .settings:
+                "settings"
+            case let .crop(source):
+                "crop-\(source.id.uuidString)"
+            }
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -38,8 +50,29 @@ struct InpaintingView: View {
         }
         .scrollDismissesKeyboard(.immediately)
         .navigationTitle("Inpainting")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    presentedSheet = .settings
+                } label: {
+                    Label("Settings", systemImage: "slider.horizontal.3")
+                }
+                .accessibilityIdentifier("inpainting-settings-button")
+                .disabled(isWorking)
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             actionBar
+        }
+        .sheet(item: $presentedSheet) { destination in
+            switch destination {
+            case .settings:
+                InpaintingSettingsSheet(settings: $settings)
+            case let .crop(source):
+                InpaintingCropSheet(image: source.image) { croppedImage in
+                    applySourceImage(croppedImage)
+                }
+            }
         }
         .task {
             await modelManager.refresh()
@@ -87,6 +120,9 @@ struct InpaintingView: View {
 
                 Text("Paint white over the area to regenerate. Unpainted pixels stay unchanged.")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Working canvas: 512 × 512")
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             } else {
                 ContentUnavailableView {
@@ -139,13 +175,13 @@ struct InpaintingView: View {
                 .font(.headline)
 
             Button("Use greenhouse example") {
-                prompt = "a warm glowing glass greenhouse extension with small plants"
+                settings.prompt = "a warm glowing glass greenhouse extension with small plants"
             }
             .font(.caption.weight(.semibold))
             .accessibilityIdentifier("inpainting-example-prompt-button")
 
             ZStack(alignment: .topLeading) {
-                if prompt.isEmpty {
+                if settings.prompt.isEmpty {
                     Text("Describe what should replace the mask")
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 5)
@@ -153,7 +189,7 @@ struct InpaintingView: View {
                         .allowsHitTesting(false)
                 }
 
-                TextEditor(text: $prompt)
+                TextEditor(text: $settings.prompt)
                     .scrollContentBackground(.hidden)
                     .textInputAutocapitalization(.sentences)
                     .accessibilityLabel("Inpainting prompt")
@@ -167,9 +203,9 @@ struct InpaintingView: View {
             )
 
             HStack(spacing: 8) {
-                inpaintingPill("\(stepCount) steps", systemImage: "arrow.triangle.2.circlepath")
-                inpaintingPill(String(format: "%.1f CFG", guidanceScale), systemImage: "scope")
-                inpaintingPill("#\(seed)", systemImage: "dice")
+                inpaintingPill("\(settings.stepCount) steps", systemImage: "arrow.triangle.2.circlepath")
+                inpaintingPill(String(format: "%.1f CFG", settings.guidanceScale), systemImage: "scope")
+                inpaintingPill("#\(settings.seed)", systemImage: "dice")
             }
             .font(.caption)
         }
@@ -302,7 +338,7 @@ struct InpaintingView: View {
     private var canGenerate: Bool {
         sourceImage != nil
             && !strokes.isEmpty
-            && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !settings.trimmedPrompt.isEmpty
             && modelManager.isInstalled
     }
 
@@ -353,15 +389,17 @@ struct InpaintingView: View {
               let data = try? await selectedPhoto.loadTransferable(
                 type: Data.self
               ),
-              let image = UIImage(data: data),
+              let image = UIImage(data: data)?.cloverNormalized,
               let cgImage = image.cgImage else {
             return
         }
 
         await MainActor.run {
-            sourceImage = cgImage
-            resultImage = nil
-            strokes.removeAll()
+            if cgImage.width == 512, cgImage.height == 512 {
+                applySourceImage(cgImage)
+            } else {
+                presentedSheet = .crop(InpaintingCropSource(image: image))
+            }
         }
     }
 
@@ -370,7 +408,11 @@ struct InpaintingView: View {
             errorMessage = "The bundled Clover sample image is unavailable."
             return
         }
-        sourceImage = sample
+        applySourceImage(sample)
+    }
+
+    private func applySourceImage(_ image: CGImage) {
+        sourceImage = image
         resultImage = nil
         strokes.removeAll()
     }
@@ -384,11 +426,7 @@ struct InpaintingView: View {
             return
         }
 
-        var settings = GenerationSettings()
-        settings.prompt = prompt
-        settings.stepCount = stepCount
-        settings.guidanceScale = guidanceScale
-        settings.seed = seed
+        let requestSettings = settings
         let token = GenerationCancellationToken()
         cancellation = token
         isWorking = true
@@ -400,7 +438,7 @@ struct InpaintingView: View {
                 let images = try await service.generate(
                     resourcesURL: ModelStorage.inpaintingResourcesURL,
                     request: InpaintingRequest(image: sourceImage, mask: mask),
-                    settings: settings,
+                    settings: requestSettings,
                     cancellation: token
                 ) { value in
                     Task { @MainActor in
@@ -414,7 +452,7 @@ struct InpaintingView: View {
                 resultImage = result
                 _ = try library.add(
                     images: [GeneratedImage(cgImage: result, imageIndex: 0)],
-                    settings: settings
+                    settings: requestSettings
                 )
             } catch GenerationError.cancelled {
                 // Cancellation is an expected interaction.

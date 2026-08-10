@@ -16,6 +16,7 @@
 		48F4A2E10F1202F90CEB7BB1 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F878F21174336ADE66CC98 /* HapticManager.swift */; };
 		540E1E7F5A5FA2316A878700 /* InpaintingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6268FE3B4117A852A51C6852 /* InpaintingView.swift */; };
 		5A509DFCAE16DD6051AB850C /* Color+Clover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09F51EC9B9598C180CF84905 /* Color+Clover.swift */; };
+		5B0E03DFAC356EE6E23DEBAC /* InpaintingSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC8D8C554A4AB228F0CC1088 /* InpaintingSettingsSheet.swift */; };
 		62600AAB2755AB84CB12D63F /* ModelStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 233CA7B87BFECEED299ADD2D /* ModelStorage.swift */; };
 		715E6DECF51AAC8064B2F9BC /* CloverApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B28610FEDB43839EE2C15B23 /* CloverApp.swift */; };
 		77D62DC6AAB87E60F82A8E04 /* CreateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF77F5F72FA18C178860EB7E /* CreateView.swift */; };
@@ -24,6 +25,7 @@
 		8ADA969CFC2770C5A12A9950 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 78BCA2819170F6D3F433D255 /* Assets.xcassets */; };
 		8ADEFA077549890310410A05 /* ArtworkImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9696B3BC224830E52324737 /* ArtworkImage.swift */; };
 		8B8F9037EEC41B9B064FBF8C /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E40853620E0E11190980BA /* LibraryView.swift */; };
+		9994F3EADCFFC63397D95D04 /* InpaintingCropSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02DE6CBF64E5F53215FE72E6 /* InpaintingCropSheet.swift */; };
 		B3BFCAD6704C972354464F16 /* GenerationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B48211C709F0EE0ED78A4D /* GenerationStore.swift */; };
 		BA6AE9816DC12CE630F1F81B /* Artwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03F535EF78EE89AD6605E1AE /* Artwork.swift */; };
 		C3904C75703A700C253BD1D5 /* CloverPipelineFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA88D1BE25E1B041C2F18A6E /* CloverPipelineFactory.swift */; };
@@ -57,6 +59,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		02DE6CBF64E5F53215FE72E6 /* InpaintingCropSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InpaintingCropSheet.swift; sourceTree = "<group>"; };
 		03D28B9CAF0BA7E3DF492124 /* GenerationSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationSettingsTests.swift; sourceTree = "<group>"; };
 		03F535EF78EE89AD6605E1AE /* Artwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Artwork.swift; sourceTree = "<group>"; };
 		08A8694BD9662FC1F7DA150B /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
@@ -91,6 +94,7 @@
 		E9696B3BC224830E52324737 /* ArtworkImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkImage.swift; sourceTree = "<group>"; };
 		EA88D1BE25E1B041C2F18A6E /* CloverPipelineFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloverPipelineFactory.swift; sourceTree = "<group>"; };
 		EF77F5F72FA18C178860EB7E /* CreateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateView.swift; sourceTree = "<group>"; };
+		FC8D8C554A4AB228F0CC1088 /* InpaintingSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InpaintingSettingsSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -178,6 +182,8 @@
 		802C0B2C7FBC5E955D1821BB /* Inpainting */ = {
 			isa = PBXGroup;
 			children = (
+				02DE6CBF64E5F53215FE72E6 /* InpaintingCropSheet.swift */,
+				FC8D8C554A4AB228F0CC1088 /* InpaintingSettingsSheet.swift */,
 				6268FE3B4117A852A51C6852 /* InpaintingView.swift */,
 			);
 			path = Inpainting;
@@ -384,8 +390,10 @@
 				45A9211D7255C77CAF1CC845 /* GenerationSettingsSheet.swift in Sources */,
 				B3BFCAD6704C972354464F16 /* GenerationStore.swift in Sources */,
 				48F4A2E10F1202F90CEB7BB1 /* HapticManager.swift in Sources */,
+				9994F3EADCFFC63397D95D04 /* InpaintingCropSheet.swift in Sources */,
 				46FAB59E66CEBBBABEB86A86 /* InpaintingGenerationService.swift in Sources */,
 				0D2E90ED251539EF14E4C447 /* InpaintingModelManager.swift in Sources */,
+				5B0E03DFAC356EE6E23DEBAC /* InpaintingSettingsSheet.swift in Sources */,
 				540E1E7F5A5FA2316A878700 /* InpaintingView.swift in Sources */,
 				8B8F9037EEC41B9B064FBF8C /* LibraryView.swift in Sources */,
 				2E90737918BF16A026626A8B /* ModelCatalog.swift in Sources */,

@@ -20,6 +20,18 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(app.buttons["inpainting-source-picker"].exists)
         XCTAssertTrue(app.otherElements["inpainting-model-status"].exists)
         XCTAssertTrue(app.buttons["inpainting-generate-button"].exists)
+
+        let settings = app.buttons["inpainting-settings-button"]
+        XCTAssertTrue(settings.exists)
+        settings.tap()
+        XCTAssertTrue(
+            app.navigationBars["Inpainting Settings"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.steppers["inpainting-steps-stepper"].exists)
+        XCTAssertTrue(app.otherElements["inpainting-steps-slider"].exists)
+        XCTAssertTrue(app.sliders["inpainting-guidance-slider"].exists)
+        app.buttons["Done"].tap()
     }
 
     @MainActor
