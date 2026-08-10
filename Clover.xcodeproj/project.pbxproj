@@ -30,6 +30,7 @@
 		C3C555BFA252CCF41BB5B57C /* ModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19893481D071D68186277EC /* ModelManager.swift */; };
 		C513CEF0C487FB2E2F82160C /* CloverUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C0B26887CC21B772F4D3999 /* CloverUITests.swift */; };
 		CF48D02C9EF0E7DC9A49C1AE /* GenerationSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D28B9CAF0BA7E3DF492124 /* GenerationSettingsTests.swift */; };
+		D28EA2CE72A4B14598E780CD /* InpaintingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDED4206333CEF8DE7993CDE /* InpaintingTests.swift */; };
 		DAF6B65A0D36FB934248AC35 /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = D087018EBF7440F68BEF0606 /* AppShell.swift */; };
 		DB141BD8436E4A12B6D8A0B6 /* ArtworkLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B84A2AEB282D3B4FB1804E43 /* ArtworkLibrary.swift */; };
 		DE6D818214A0D3559ADC6769 /* StableDiffusion in Frameworks */ = {isa = PBXBuildFile; productRef = 0EF07D858622E78717D2AB43 /* StableDiffusion */; };
@@ -81,6 +82,7 @@
 		B28610FEDB43839EE2C15B23 /* CloverApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloverApp.swift; sourceTree = "<group>"; };
 		B525B607D83AA793FE4AAF0A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B84A2AEB282D3B4FB1804E43 /* ArtworkLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkLibrary.swift; sourceTree = "<group>"; };
+		BDED4206333CEF8DE7993CDE /* InpaintingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InpaintingTests.swift; sourceTree = "<group>"; };
 		C08F0182E8E7B507094AFC14 /* ArtworkDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkDetailView.swift; sourceTree = "<group>"; };
 		C5B48211C709F0EE0ED78A4D /* GenerationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationStore.swift; sourceTree = "<group>"; };
 		C7F878F21174336ADE66CC98 /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
@@ -149,6 +151,7 @@
 			isa = PBXGroup;
 			children = (
 				03D28B9CAF0BA7E3DF492124 /* GenerationSettingsTests.swift */,
+				BDED4206333CEF8DE7993CDE /* InpaintingTests.swift */,
 			);
 			path = CloverTests;
 			sourceTree = "<group>";
@@ -400,6 +403,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CF48D02C9EF0E7DC9A49C1AE /* GenerationSettingsTests.swift in Sources */,
+				D28EA2CE72A4B14598E780CD /* InpaintingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

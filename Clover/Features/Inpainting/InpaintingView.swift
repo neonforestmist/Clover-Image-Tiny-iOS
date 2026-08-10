@@ -550,6 +550,13 @@ private enum MaskRenderer {
 
         context.setFillColor(gray: 0, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+
+        // DragGesture locations and the Canvas overlay use a top-left origin.
+        // CGContext's default bitmap coordinate system uses a bottom-left
+        // origin, so flip only the stroke drawing coordinates to keep the
+        // generated mask aligned with what the user painted on screen.
+        context.translateBy(x: 0, y: CGFloat(image.height))
+        context.scaleBy(x: 1, y: -1)
         context.setStrokeColor(gray: 1, alpha: 1)
         context.setLineWidth(max(32, CGFloat(image.width) / 18))
         context.setLineCap(.round)
