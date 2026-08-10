@@ -3,6 +3,21 @@ import XCTest
 @testable import Clover
 
 final class InpaintingTests: XCTestCase {
+    func testStepCountIsClampedToSafeOnDeviceRange() {
+        XCTAssertEqual(
+            InpaintingGenerationLimits.clampedStepCount(3),
+            InpaintingGenerationLimits.minimumStepCount
+        )
+        XCTAssertEqual(
+            InpaintingGenerationLimits.clampedStepCount(30),
+            30
+        )
+        XCTAssertEqual(
+            InpaintingGenerationLimits.clampedStepCount(100),
+            InpaintingGenerationLimits.maximumStepCount
+        )
+    }
+
     func testCompositePreservesEveryUnmaskedPixel() throws {
         let original = try XCTUnwrap(makeRGBAImage { index in
             (

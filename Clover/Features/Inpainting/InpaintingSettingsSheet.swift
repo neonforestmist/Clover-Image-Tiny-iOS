@@ -10,17 +10,19 @@ struct InpaintingSettingsSheet: View {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Stepper(
-                            "\(settings.stepCount) steps",
-                            value: $settings.stepCount,
-                            in: 4...100
+                            "\(stepCount.wrappedValue) steps",
+                            value: stepCount,
+                            in: InpaintingGenerationLimits.minimumStepCount
+                                ... InpaintingGenerationLimits.maximumStepCount
                         )
                         .accessibilityIdentifier("inpainting-steps-stepper")
 
                         HapticlessIntegerSlider(
-                            value: $settings.stepCount,
-                            in: 4...100,
+                            value: stepCount,
+                            in: InpaintingGenerationLimits.minimumStepCount
+                                ... InpaintingGenerationLimits.maximumStepCount,
                             accessibilityLabel: "Inpainting steps",
-                            accessibilityValue: "\(settings.stepCount)",
+                            accessibilityValue: "\(stepCount.wrappedValue)",
                             accessibilityIdentifier: "inpainting-steps-slider"
                         )
                     }
@@ -46,7 +48,7 @@ struct InpaintingSettingsSheet: View {
                 } header: {
                     Text("Generation")
                 } footer: {
-                    Text("More steps can improve detail but take longer on device.")
+                    Text("Inpainting supports 4–50 steps on device. More steps can improve detail but take longer.")
                 }
 
                 Section("Seed") {
@@ -119,5 +121,16 @@ struct InpaintingSettingsSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private var stepCount: Binding<Int> {
+        Binding(
+            get: {
+                InpaintingGenerationLimits.clampedStepCount(settings.stepCount)
+            },
+            set: {
+                settings.stepCount = InpaintingGenerationLimits.clampedStepCount($0)
+            }
+        )
     }
 }

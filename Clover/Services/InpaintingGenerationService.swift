@@ -2,6 +2,16 @@ import CoreGraphics
 import CoreML
 import Foundation
 import StableDiffusion
+import UIKit
+
+enum InpaintingGenerationLimits {
+    static let minimumStepCount = 4
+    static let maximumStepCount = 50
+
+    static func clampedStepCount(_ stepCount: Int) -> Int {
+        min(max(stepCount, minimumStepCount), maximumStepCount)
+    }
+}
 
 struct InpaintingRequest: @unchecked Sendable {
     let image: CGImage
@@ -135,8 +145,8 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         request: InpaintingRequest,
         settings: GenerationSettings,
         cancellation: GenerationCancellationToken,
-        progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> [CGImage] {
+        progress: @escaping @Sendable (GenerationUpdate) -> Void
+    ) async throws -> GenerationResult {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 queue.async {
@@ -164,8 +174,8 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         request: InpaintingRequest,
         settings: GenerationSettings,
         cancellation: GenerationCancellationToken,
-        progress: @escaping @Sendable (Double) -> Void
-    ) throws -> [CGImage] {
+        progress: @escaping @Sendable (GenerationUpdate) -> Void
+    ) throws -> GenerationResult {
         guard let maskedImage = InpaintingImageComposer.maskedImage(
             from: request.image,
             mask: request.mask
@@ -179,6 +189,9 @@ final class CoreMLInpaintingService: @unchecked Sendable {
             resourcesURL: resourcesURL,
             configuration: configuration
         )
+        let requestedStepCount = InpaintingGenerationLimits.clampedStepCount(
+            settings.stepCount
+        )
         var generation = StableDiffusionPipeline.Configuration(
             prompt: settings.trimmedPrompt
         )
@@ -187,30 +200,91 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         generation.maskedImage = maskedImage
         generation.inpaintingMask = request.mask
         generation.imageCount = max(settings.imageCount, 1)
-        generation.stepCount = settings.stepCount
+        generation.stepCount = requestedStepCount
         generation.seed = settings.seed
         generation.guidanceScale = Float(settings.guidanceScale)
         generation.schedulerType = inpaintingScheduler(for: settings.scheduler)
         generation.rngType = inpaintingRandomGenerator(for: settings.randomGenerator)
+        generation.useDenoisedIntermediates = true
         generation.disableSafety = CloverPipelineFactory.isSafetyCheckerDisabled
 
         defer { pipeline.unloadResources() }
+        var storedPreviews: [GeneratedPreviewFrame] = []
         let generated = try pipeline.generateImages(configuration: generation) { update in
-            let complete = Double(update.step + 1) / Double(max(update.stepCount, 1))
-            progress(min(max(complete, 0), 1))
+            let schedulerStepCount = max(update.stepCount, 1)
+            let schedulerStep = min(
+                max(update.step + 1, 1),
+                schedulerStepCount
+            )
+            let completedStep = GenerationStepMapper.visibleStep(
+                updateStep: update.step,
+                requestedStepCount: requestedStepCount
+            )
+            let imageProgress = Double(schedulerStep)
+                / Double(schedulerStepCount)
+            let renderedPreview = autoreleasepool {
+                LatentPreviewRenderer.render(update.currentLatentSamples.first)
+            }
+            let previewImage = renderedPreview.flatMap { image in
+                InpaintingImageComposer.composite(
+                    original: request.image,
+                    generated: image,
+                    mask: request.mask
+                )
+            } ?? renderedPreview
+            let preview = previewImage.map { image in
+                GenerationPreview(
+                    cgImage: image,
+                    step: completedStep,
+                    stepCount: requestedStepCount,
+                    imageIndex: 0
+                )
+            }
+            if completedStep < requestedStepCount,
+               let previewImage,
+               let jpegData = autoreleasepool(invoking: {
+                   UIImage(cgImage: previewImage).jpegData(
+                       compressionQuality: 0.82
+                   )
+               }) {
+                storedPreviews.append(
+                    GeneratedPreviewFrame(
+                        jpegData: jpegData,
+                        step: completedStep,
+                        stepCount: requestedStepCount,
+                        imageIndex: 0
+                    )
+                )
+            }
+            progress(
+                GenerationUpdate(
+                    progress: min(max(imageProgress, 0), 1),
+                    preview: preview
+                )
+            )
             return !cancellation.isCancelled
         }
         guard !cancellation.isCancelled else {
             throw GenerationError.cancelled
         }
-        return generated.compactMap { image in
-            guard let image else { return nil }
+        let images: [CGImage] = generated.compactMap { optionalImage -> CGImage? in
+            guard let image = optionalImage else { return nil }
             return InpaintingImageComposer.composite(
                 original: request.image,
                 generated: image,
                 mask: request.mask
             ) ?? image
         }
+        guard !images.isEmpty else {
+            throw GenerationError.noImages
+        }
+        progress(GenerationUpdate(progress: 1, preview: nil))
+        return GenerationResult(
+            images: images.enumerated().map { index, image in
+                GeneratedImage(cgImage: image, imageIndex: index)
+            },
+            previewFrames: storedPreviews
+        )
     }
 
     private func inpaintingScheduler(

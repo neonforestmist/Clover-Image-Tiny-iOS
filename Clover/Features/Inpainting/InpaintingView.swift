@@ -8,12 +8,12 @@ struct InpaintingView: View {
 
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var sourceImage: CGImage?
-    @State private var resultImage: CGImage?
     @State private var strokes: [MaskStroke] = []
     @State private var settings = GenerationSettings()
     @State private var presentedSheet: InpaintingSheet?
     @State private var isWorking = false
     @State private var progress = 0.0
+    @State private var preview: GenerationPreview?
     @State private var errorMessage: String?
     @State private var cancellation: GenerationCancellationToken?
     @State private var generationTask: Task<Void, Never>?
@@ -40,10 +40,6 @@ struct InpaintingView: View {
                 sourceSection
                 promptSection
                 modelSection
-
-                if let resultImage {
-                    resultSection(resultImage)
-                }
             }
             .padding()
             .padding(.bottom, 18)
@@ -112,11 +108,20 @@ struct InpaintingView: View {
                 }
             }
 
-            if let sourceImage {
+            if isWorking, let preview {
+                InpaintingPreviewCanvas(preview: preview)
+                    .frame(height: 300)
+            } else if let sourceImage {
                 MaskEditor(image: sourceImage, strokes: $strokes)
                     .frame(height: 300)
                     .clipShape(.rect(cornerRadius: 16))
                     .accessibilityIdentifier("inpainting-mask-editor")
+                    .allowsHitTesting(!isWorking)
+
+                if isWorking {
+                    ProgressView("Preparing preview…")
+                        .frame(maxWidth: .infinity)
+                }
 
                 Text("Paint white over the area to regenerate. Unpainted pixels stay unchanged.")
                     .font(.caption)
@@ -203,7 +208,10 @@ struct InpaintingView: View {
             )
 
             HStack(spacing: 8) {
-                inpaintingPill("\(settings.stepCount) steps", systemImage: "arrow.triangle.2.circlepath")
+                inpaintingPill(
+                    "\(InpaintingGenerationLimits.clampedStepCount(settings.stepCount)) steps",
+                    systemImage: "arrow.triangle.2.circlepath"
+                )
                 inpaintingPill(String(format: "%.1f CFG", settings.guidanceScale), systemImage: "scope")
                 inpaintingPill("#\(settings.seed)", systemImage: "dice")
             }
@@ -286,22 +294,15 @@ struct InpaintingView: View {
         .accessibilityIdentifier("inpainting-model-status")
     }
 
-    private func resultSection(_ image: CGImage) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Result")
-                .font(.headline)
-            Image(uiImage: UIImage(cgImage: image))
-                .resizable()
-                .scaledToFit()
-                .clipShape(.rect(cornerRadius: 16))
-                .accessibilityLabel("Inpainting result")
-                .accessibilityIdentifier("inpainting-result")
-        }
-    }
-
     private var actionBar: some View {
         VStack(spacing: 8) {
             if isWorking {
+                if let preview {
+                    Text("Step \(preview.step) of \(preview.stepCount)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("inpainting-preview-step")
+                }
                 ProgressView(value: progress)
                     .tint(.cloverGreen)
                     .accessibilityLabel("Inpainting progress")
@@ -413,56 +414,100 @@ struct InpaintingView: View {
 
     private func applySourceImage(_ image: CGImage) {
         sourceImage = image
-        resultImage = nil
+        preview = nil
         strokes.removeAll()
     }
 
     private func startGeneration() {
-        guard let sourceImage,
+        guard let originalImage = sourceImage,
               let mask = MaskRenderer.makeMask(
-                image: sourceImage,
+                image: originalImage,
                 strokes: strokes
               ) else {
             return
         }
 
-        let requestSettings = settings
+        var requestSettings = settings
+        requestSettings.stepCount = InpaintingGenerationLimits.clampedStepCount(
+            settings.stepCount
+        )
+        requestSettings.livePreviewEnabled = true
+        requestSettings.previewInterval = 1
         let token = GenerationCancellationToken()
         cancellation = token
         isWorking = true
         progress = 0
+        preview = nil
         errorMessage = nil
 
         generationTask = Task { @MainActor in
             do {
-                let images = try await service.generate(
+                let result = try await service.generate(
                     resourcesURL: ModelStorage.inpaintingResourcesURL,
-                    request: InpaintingRequest(image: sourceImage, mask: mask),
+                    request: InpaintingRequest(image: originalImage, mask: mask),
                     settings: requestSettings,
                     cancellation: token
-                ) { value in
+                ) { update in
                     Task { @MainActor in
-                        progress = value
+                        progress = update.progress
+                        if let updatePreview = update.preview {
+                            preview = updatePreview
+                        }
                     }
                 }
 
-                guard !token.isCancelled, let result = images.first else {
+                guard !token.isCancelled, let image = result.images.first else {
                     throw GenerationError.cancelled
                 }
-                resultImage = result
+                sourceImage = image.cgImage
+                strokes.removeAll()
+                preview = nil
                 _ = try library.add(
-                    images: [GeneratedImage(cgImage: result, imageIndex: 0)],
+                    images: result.images,
+                    previewFrames: result.previewFrames,
                     settings: requestSettings
                 )
             } catch GenerationError.cancelled {
                 // Cancellation is an expected interaction.
             } catch {
+                preview = nil
                 errorMessage = error.localizedDescription
             }
             isWorking = false
             cancellation = nil
             generationTask = nil
         }
+    }
+}
+
+private struct InpaintingPreviewCanvas: View {
+    let preview: GenerationPreview
+
+    var body: some View {
+        Image(
+            decorative: preview.cgImage,
+            scale: 1
+        )
+        .resizable()
+        .scaledToFit()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black)
+        .clipShape(.rect(cornerRadius: 16))
+        .overlay(alignment: .bottom) {
+            Label(
+                "Step \(preview.step) of \(preview.stepCount)",
+                systemImage: "sparkles"
+            )
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: .capsule)
+            .padding()
+        }
+        .accessibilityLabel(
+            "Inpainting preview, step \(preview.step) of \(preview.stepCount)"
+        )
+        .accessibilityIdentifier("inpainting-preview")
     }
 }
 
