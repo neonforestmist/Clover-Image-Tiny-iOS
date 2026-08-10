@@ -167,9 +167,16 @@ struct HapticlessIntegerSlider: View {
                     .offset(x: thumbDiameter / 2)
 
                 Circle()
-                    .fill(.background)
+                    .fill(Color.white)
                     .frame(width: thumbDiameter, height: thumbDiameter)
-                    .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                    .overlay {
+                        Circle()
+                            .strokeBorder(
+                                Color.black.opacity(0.14),
+                                lineWidth: 1
+                            )
+                    }
+                    .shadow(color: .black.opacity(0.32), radius: 2, y: 1)
                     .position(x: thumbCenter, y: geometry.size.height / 2)
             }
             .contentShape(Rectangle())
