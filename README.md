@@ -25,6 +25,8 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 - NumPy and PyTorch-compatible random generators
 - Neural Engine, automatic, and GPU compute preferences
 - Local artwork library and Photos export
+- Dedicated **Inpainting** tab between Create and Library for image selection,
+  mask painting, and local edits
 - Base-first downloads: install Clover, then add only the styles you want
 - Import a Clover-compatible `.safetensors` style from **On My iPhone → Clover → Imported Styles**
 - Visible downloads in **On My iPhone → Clover → Models**
@@ -48,7 +50,8 @@ The repository and app bundle do not contain the model weights.
 3. Select the `Clover` scheme and your Apple development team.
 4. Choose a connected iPhone or iPad. Simulator is suitable for UI work.
 5. Build and run.
-6. Open **Models & Styles** in the app and download a model.
+6. Open **Models & Styles** in the app and download a model, or open
+   **Inpainting** to paint a mask over a source image.
 
 The app reads its versioned catalog from
 [`neonforestmist/Clover-Image-Tiny-CoreML`](https://huggingface.co/neonforestmist/Clover-Image-Tiny-CoreML).
@@ -81,7 +84,9 @@ Inpainting is a separate, standalone Core ML pipeline because its U-Net has a
 9-channel input and needs a VAE encoder. Download the companion resource
 bundle from
 [`neonforestmist/Clover-Image-Tiny-Inpaint-CoreML`](https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML),
-then place its `Resources` directory in an app-managed model folder. The
+or open the **Inpainting** tab and tap **Download**. Clover fetches the
+repository manifest, verifies every resource by size and SHA-256, and stores
+the bundle at **On My iPhone → Clover → Models → Inpainting**. The
 runtime entry point is `CoreMLInpaintingService`:
 
 ```swift
@@ -139,7 +144,7 @@ base export and catalog format rather than simply adding two adapter states.
 ```text
 Clover/
 ├── App/          App entry point and navigation
-├── Features/     Create, model picker, settings, and library screens
+├── Features/     Create, inpainting, model picker, settings, and library screens
 ├── Models/       Generation settings, artwork, and catalog types
 ├── Services/     Core ML inference, downloads, storage, and Photos export
 └── Support/      Assets, colors, and app configuration

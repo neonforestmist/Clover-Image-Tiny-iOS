@@ -239,7 +239,22 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
             }
         }
 
-        let latentSampleShape = try unet.latentSampleShape()
+        let unetSampleShape = try unet.latentSampleShape()
+        // The inpainting U-Net consumes a 9-channel conditioning tensor, but
+        // the diffusion process still starts from a four-channel noise latent.
+        // The mask and masked-image latent are appended immediately before
+        // each U-Net call below.
+        let latentSampleShape: [Int]
+        if config.mode == .inpainting {
+            latentSampleShape = [
+                unetSampleShape[0],
+                4,
+                unetSampleShape[2],
+                unetSampleShape[3],
+            ]
+        } else {
+            latentSampleShape = unetSampleShape
+        }
 
         // Generate random latent samples from specified seed
         var latents: [MLShapedArray<Float32>] = try generateLatentSamples(

@@ -3,6 +3,26 @@ import XCTest
 
 final class CloverUITests: XCTestCase {
     @MainActor
+    func testInpaintingTabIsBetweenCreateAndLibrary() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-reset", "-ui-testing-preview"]
+        app.launch()
+
+        let tabs = app.tabBars.buttons
+        XCTAssertTrue(tabs["Create"].waitForExistence(timeout: 5))
+        XCTAssertTrue(tabs["Inpainting"].exists)
+        XCTAssertTrue(tabs["Library"].exists)
+
+        tabs["Inpainting"].tap()
+        XCTAssertTrue(
+            app.navigationBars["Inpainting"].waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["inpainting-source-picker"].exists)
+        XCTAssertTrue(app.otherElements["inpainting-model-status"].exists)
+        XCTAssertTrue(app.buttons["inpainting-generate-button"].exists)
+    }
+
+    @MainActor
     func testParametersGenerationAndLibraryFlow() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-reset", "-ui-testing-preview"]

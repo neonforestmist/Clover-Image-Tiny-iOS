@@ -60,6 +60,48 @@ enum ModelStorage {
             .appending(path: "manifest.json")
     }
 
+    /// Standalone 9-channel inpainting resources copied or downloaded into
+    /// the app's Documents container.
+    static var inpaintingResourcesURL: URL {
+        rootURL
+            .appending(path: "Inpainting", directoryHint: .isDirectory)
+    }
+
+    static var hasInpaintingResources: Bool {
+        isInpaintingResourcesDirectory(inpaintingResourcesURL)
+    }
+
+    static func isInpaintingResourcesDirectory(_ url: URL) -> Bool {
+        let required = [
+            "TextEncoder.mlmodelc",
+            "VAEEncoder.mlmodelc",
+            "VAEDecoder.mlmodelc",
+            "SafetyChecker.mlmodelc",
+            "vocab.json",
+            "merges.txt",
+        ]
+        let hasUnet = FileManager.default.fileExists(
+            atPath: url
+                .appending(path: "Unet.mlmodelc")
+                .path
+        ) || (
+            FileManager.default.fileExists(
+                atPath: url
+                    .appending(path: "UnetChunk1.mlmodelc")
+                    .path
+            ) && FileManager.default.fileExists(
+                atPath: url
+                    .appending(path: "UnetChunk2.mlmodelc")
+                    .path
+            )
+        )
+        return hasUnet && required.allSatisfy {
+            FileManager.default.fileExists(
+                atPath: url.appending(path: $0).path
+            )
+        }
+    }
+
     /// The user-visible drop folder for side-loaded LoRA styles. It sits at
     /// the top level of the app's Documents container, so in the Files app it
     /// appears as On My iPhone › Clover › Imported Styles.

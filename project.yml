@@ -13,7 +13,7 @@ packages:
 
 settings:
   base:
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: Z3GU26J2H4
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: targeted
 

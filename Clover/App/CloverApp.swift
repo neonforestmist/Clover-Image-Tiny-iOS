@@ -4,6 +4,7 @@ import SwiftUI
 struct CloverApp: App {
     @State private var library = ArtworkLibrary()
     @State private var modelManager = ModelManager()
+    @State private var inpaintingModelManager = InpaintingModelManager()
     private let generator = GenerationServiceFactory.make()
 
     var body: some Scene {
@@ -11,7 +12,8 @@ struct CloverApp: App {
             AppShell(
                 library: library,
                 generator: generator,
-                modelManager: modelManager
+                modelManager: modelManager,
+                inpaintingModelManager: inpaintingModelManager
             )
         }
     }
