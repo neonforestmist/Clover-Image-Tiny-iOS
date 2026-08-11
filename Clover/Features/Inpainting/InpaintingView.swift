@@ -9,6 +9,9 @@ struct InpaintingView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var sourceImage: CGImage?
     @State private var strokes: [MaskStroke] = []
+    @State private var redoStrokes: [MaskStroke] = []
+    @State private var maskTool: MaskTool = .paint
+    @State private var brushSize = 56.0
     @State private var settings = GenerationSettings.inpaintingDefaults
     @State private var presentedSheet: InpaintingSheet?
     @State private var isWorking = false
@@ -101,13 +104,6 @@ struct InpaintingView: View {
                 Label("Source image", systemImage: "photo")
                     .font(.headline)
                 Spacer()
-                if sourceImage != nil {
-                    Button("Clear mask") {
-                        strokes.removeAll()
-                    }
-                    .font(.caption.weight(.semibold))
-                    .disabled(isWorking)
-                }
             }
 
             if isWorking, let preview {
@@ -130,11 +126,22 @@ struct InpaintingView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("inpainting-preview-step")
             } else if let sourceImage {
-                MaskEditor(image: sourceImage, strokes: $strokes)
+                MaskEditor(
+                    image: sourceImage,
+                    strokes: $strokes,
+                    tool: maskTool,
+                    brushSize: brushSize
+                ) {
+                    redoStrokes.removeAll()
+                }
                     .frame(height: 300)
                     .clipShape(.rect(cornerRadius: 16))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Mask drawing canvas")
                     .accessibilityIdentifier("inpainting-mask-editor")
                     .allowsHitTesting(!isWorking)
+
+                maskControls
 
                 if isWorking {
                     ProgressView("Preparing preview…")
@@ -174,6 +181,81 @@ struct InpaintingView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var maskControls: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Picker("Mask tool", selection: $maskTool) {
+                    ForEach(MaskTool.allCases) { tool in
+                        Label(tool.title, systemImage: tool.systemImage)
+                            .tag(tool)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("inpainting-mask-tool-picker")
+
+                Button {
+                    undoMaskStroke()
+                } label: {
+                    Label("Undo", systemImage: "arrow.uturn.backward")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.bordered)
+                .disabled(strokes.isEmpty || isWorking)
+                .accessibilityIdentifier("inpainting-mask-undo")
+
+                Button {
+                    redoMaskStroke()
+                } label: {
+                    Label("Redo", systemImage: "arrow.uturn.forward")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.bordered)
+                .disabled(redoStrokes.isEmpty || isWorking)
+                .accessibilityIdentifier("inpainting-mask-redo")
+            }
+
+            HStack(spacing: 10) {
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 7))
+                    .accessibilityHidden(true)
+                Slider(value: $brushSize, in: 20...120, step: 2)
+                    .disabled(isWorking)
+                    .accessibilityLabel("Mask brush size")
+                    .accessibilityValue("\(Int(brushSize)) pixels")
+                    .accessibilityIdentifier("inpainting-brush-size")
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 18))
+                    .accessibilityHidden(true)
+                Text("\(Int(brushSize)) px")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 46, alignment: .trailing)
+            }
+
+            HStack {
+                Label(
+                    maskTool == .paint ? "Painting edit area" : "Erasing mask",
+                    systemImage: maskTool.systemImage
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear mask", role: .destructive) {
+                    strokes.removeAll()
+                    redoStrokes.removeAll()
+                }
+                .font(.caption.weight(.semibold))
+                .disabled(strokes.isEmpty || isWorking)
+                .accessibilityIdentifier("inpainting-mask-clear")
+            }
+        }
+        .padding(12)
+        .background(
+            Color(.secondarySystemBackground),
+            in: .rect(cornerRadius: 14)
+        )
+    }
+
     private var photoPicker: some View {
         PhotosPicker(
             selection: $selectedPhoto,
@@ -197,8 +279,8 @@ struct InpaintingView: View {
             Text("Prompt")
                 .font(.headline)
 
-            Button("Use greenhouse example") {
-                settings.prompt = "a warm glowing glass greenhouse extension with small plants"
+            Button("Use cat example") {
+                settings.prompt = "a small orange tabby cat sitting naturally in the doorway, detailed photography"
             }
             .font(.caption.weight(.semibold))
             .accessibilityIdentifier("inpainting-example-prompt-button")
@@ -437,14 +519,29 @@ struct InpaintingView: View {
         sourceImage = image
         preview = nil
         strokes.removeAll()
+        redoStrokes.removeAll()
+        maskTool = .paint
+    }
+
+    private func undoMaskStroke() {
+        guard let stroke = strokes.popLast() else { return }
+        redoStrokes.append(stroke)
+    }
+
+    private func redoMaskStroke() {
+        guard let stroke = redoStrokes.popLast() else { return }
+        strokes.append(stroke)
     }
 
     private func startGeneration() {
-        guard let originalImage = sourceImage,
-              let mask = MaskRenderer.makeMask(
-                image: originalImage,
-                strokes: strokes
-              ) else {
+        guard let originalImage = sourceImage else {
+            return
+        }
+        guard let mask = MaskRenderer.makeMask(
+            image: originalImage,
+            strokes: strokes
+        ) else {
+            errorMessage = "Paint at least one area for Clover to replace. A fully erased mask has nothing to edit."
             return
         }
 
@@ -488,6 +585,7 @@ struct InpaintingView: View {
                 }
                 sourceImage = image.cgImage
                 strokes.removeAll()
+                redoStrokes.removeAll()
                 preview = nil
                 _ = try library.add(
                     images: result.images,
@@ -530,13 +628,39 @@ private struct InpaintingPreviewCanvas: View {
     }
 }
 
+private enum MaskTool: String, CaseIterable, Identifiable, Sendable {
+    case paint
+    case erase
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .paint: "Paint"
+        case .erase: "Erase"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .paint: "paintbrush.fill"
+        case .erase: "eraser.fill"
+        }
+    }
+}
+
 private struct MaskStroke: Sendable {
     var points: [CGPoint]
+    var width: CGFloat
+    var tool: MaskTool
 }
 
 private struct MaskEditor: View {
     let image: CGImage
     @Binding var strokes: [MaskStroke]
+    let tool: MaskTool
+    let brushSize: Double
+    let onCommit: () -> Void
     @State private var activeStroke: MaskStroke?
 
     var body: some View {
@@ -566,7 +690,11 @@ private struct MaskEditor: View {
                         guard rect.contains(value.location) else { return }
                         let point = normalizedPoint(value.location, in: rect)
                         if activeStroke == nil {
-                            activeStroke = MaskStroke(points: [point])
+                            activeStroke = MaskStroke(
+                                points: [point],
+                                width: brushSize,
+                                tool: tool
+                            )
                         } else {
                             activeStroke?.points.append(point)
                         }
@@ -574,6 +702,7 @@ private struct MaskEditor: View {
                     .onEnded { _ in
                         if let activeStroke {
                             strokes.append(activeStroke)
+                            onCommit()
                         }
                         activeStroke = nil
                     }
@@ -596,15 +725,23 @@ private struct MaskEditor: View {
         if stroke.points.count == 1 {
             path.addLine(to: point(first, in: rect))
         }
-        context.stroke(
-            path,
-            with: .color(.white.opacity(0.82)),
-            style: StrokeStyle(
-                lineWidth: max(18, rect.width / 18),
-                lineCap: .round,
-                lineJoin: .round
+        context.drawLayer { layer in
+            layer.blendMode = stroke.tool == .paint
+                ? .normal
+                : .destinationOut
+            layer.stroke(
+                path,
+                with: .color(.white.opacity(0.82)),
+                style: StrokeStyle(
+                    lineWidth: max(
+                        1,
+                        stroke.width / CGFloat(image.width) * rect.width
+                    ),
+                    lineCap: .round,
+                    lineJoin: .round
+                )
             )
-        )
+        }
     }
 
     private func normalizedPoint(_ location: CGPoint, in rect: CGRect) -> CGPoint {
@@ -659,13 +796,31 @@ private enum MaskRenderer {
         // generated mask aligned with what the user painted on screen.
         context.translateBy(x: 0, y: CGFloat(image.height))
         context.scaleBy(x: 1, y: -1)
-        context.setStrokeColor(gray: 1, alpha: 1)
-        context.setLineWidth(max(32, CGFloat(image.width) / 18))
         context.setLineCap(.round)
         context.setLineJoin(.round)
 
         for stroke in strokes {
             guard let first = stroke.points.first else { continue }
+            context.setStrokeColor(
+                gray: stroke.tool == .paint ? 1 : 0,
+                alpha: 1
+            )
+            context.setFillColor(
+                gray: stroke.tool == .paint ? 1 : 0,
+                alpha: 1
+            )
+            context.setLineWidth(stroke.width)
+            if stroke.points.count == 1 {
+                context.fillEllipse(
+                    in: CGRect(
+                        x: first.x * CGFloat(image.width) - stroke.width / 2,
+                        y: first.y * CGFloat(image.height) - stroke.width / 2,
+                        width: stroke.width,
+                        height: stroke.width
+                    )
+                )
+                continue
+            }
             context.beginPath()
             context.move(
                 to: CGPoint(
@@ -681,21 +836,21 @@ private enum MaskRenderer {
                     )
                 )
             }
-            if stroke.points.count == 1 {
-                context.addArc(
-                    center: CGPoint(
-                        x: first.x * CGFloat(image.width),
-                        y: first.y * CGFloat(image.height)
-                    ),
-                    radius: max(16, CGFloat(image.width) / 36),
-                    startAngle: 0,
-                    endAngle: 2 * .pi,
-                    clockwise: false
-                )
-            }
             context.strokePath()
         }
-        return context.makeImage()
+        guard let mask = context.makeImage(), containsPaint(mask) else {
+            return nil
+        }
+        return mask
+    }
+
+    private static func containsPaint(_ image: CGImage) -> Bool {
+        guard let data = image.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else {
+            return false
+        }
+        let count = CFDataGetLength(data)
+        return (0..<count).contains { bytes[$0] > 0 }
     }
 }
 

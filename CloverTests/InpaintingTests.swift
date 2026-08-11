@@ -222,6 +222,45 @@ final class InpaintingTests: XCTestCase {
         XCTAssertTrue(InpaintingModelManifest.isRevisionCurrent(at: directory))
     }
 
+    func testCropGeometryCentersWideImageWithoutFlippingVertically() {
+        let rect = InpaintingCropGeometry.cropRect(
+            imageSize: CGSize(width: 1_000, height: 500),
+            canvasSize: 300,
+            zoom: 1,
+            offset: .zero
+        )
+
+        XCTAssertEqual(rect.origin.x, 250, accuracy: 0.001)
+        XCTAssertEqual(rect.origin.y, 0, accuracy: 0.001)
+        XCTAssertEqual(rect.width, 500, accuracy: 0.001)
+        XCTAssertEqual(rect.height, 500, accuracy: 0.001)
+    }
+
+    func testCropGeometryPositiveDownwardOffsetRevealsTopPixels() {
+        let rect = InpaintingCropGeometry.cropRect(
+            imageSize: CGSize(width: 500, height: 1_000),
+            canvasSize: 300,
+            zoom: 1,
+            offset: CGSize(width: 0, height: 60)
+        )
+
+        XCTAssertEqual(rect.origin.x, 0, accuracy: 0.001)
+        XCTAssertEqual(rect.origin.y, 150, accuracy: 0.001)
+        XCTAssertEqual(rect.height, 500, accuracy: 0.001)
+    }
+
+    func testCropOffsetIsConstrainedAtEveryZoomLevel() {
+        let offset = InpaintingCropGeometry.constrainedOffset(
+            CGSize(width: 500, height: -500),
+            canvas: 300,
+            imageSize: CGSize(width: 1_000, height: 500),
+            scale: 1.2
+        )
+
+        XCTAssertEqual(offset.width, 450, accuracy: 0.001)
+        XCTAssertEqual(offset.height, -150, accuracy: 0.001)
+    }
+
     private func makeRGBAImage(
         width: Int = 8,
         height: Int = 8,

@@ -112,6 +112,43 @@ final class CloverUITests: XCTestCase {
     }
 
     @MainActor
+    func testInpaintingMaskEditorUndoRedoAndBrushControls() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-reset", "-ui-testing-preview"]
+        app.launch()
+
+        app.tabBars.buttons["Inpainting"].tap()
+        let sample = app.buttons["inpainting-sample-button"]
+        XCTAssertTrue(sample.waitForExistence(timeout: 5))
+        sample.tap()
+
+        let editor = app.otherElements["inpainting-mask-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.segmentedControls["inpainting-mask-tool-picker"].exists)
+        XCTAssertTrue(app.sliders["inpainting-brush-size"].exists)
+
+        let undo = app.buttons["inpainting-mask-undo"]
+        let redo = app.buttons["inpainting-mask-redo"]
+        XCTAssertFalse(undo.isEnabled)
+        XCTAssertFalse(redo.isEnabled)
+
+        editor.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.38, dy: 0.38)
+        ).press(
+            forDuration: 0.1,
+            thenDragTo: editor.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.62, dy: 0.62)
+            )
+        )
+        XCTAssertTrue(undo.isEnabled)
+        undo.tap()
+        XCTAssertTrue(redo.isEnabled)
+        redo.tap()
+        XCTAssertTrue(undo.isEnabled)
+        XCTAssertTrue(app.buttons["inpainting-mask-clear"].isEnabled)
+    }
+
+    @MainActor
     func testInstalledModelGeneration() throws {
         guard ProcessInfo.processInfo.environment[
             "CLOVER_RUN_REAL_MODEL_TEST"
@@ -184,5 +221,99 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(cancel.waitForExistence(timeout: 30))
         XCTAssertTrue(generate.waitForExistence(timeout: 600))
         XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    @MainActor
+    func testInstalledInpaintingModelGeneration() throws {
+        guard ProcessInfo.processInfo.environment[
+            "CLOVER_RUN_REAL_INPAINT_TEST"
+        ] == "1" else {
+            throw XCTSkip("Requires the optional inpainting model on an iPhone")
+        }
+
+        let app = XCUIApplication()
+        app.launch()
+
+        app.tabBars.buttons["Inpainting"].tap()
+
+        let sample = app.buttons["inpainting-sample-button"]
+        XCTAssertTrue(sample.waitForExistence(timeout: 10))
+        sample.tap()
+
+        let editor = app.otherElements["inpainting-mask-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        // Fill a coherent doorway-sized region so the generated object has
+        // enough latent area to form, instead of testing a thin diagonal line.
+        for y in [0.58, 0.64, 0.70, 0.76] {
+            editor.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.44, dy: y)
+            ).press(
+                forDuration: 0.05,
+                thenDragTo: editor.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.56, dy: y)
+                )
+            )
+        }
+        app.buttons["inpainting-example-prompt-button"].tap()
+
+        let ready = app.staticTexts["Ready on device"]
+        let download = app.buttons["inpainting-download-button"]
+        for _ in 0..<5 where !ready.exists && !download.exists {
+            app.swipeUp()
+        }
+        if !ready.exists {
+            XCTAssertTrue(download.waitForExistence(timeout: 20))
+            XCTAssertTrue(
+                (download.label).contains("1,672 MB"),
+                "The stale model should require the pinned v2 package"
+            )
+            download.tap()
+            XCTAssertTrue(
+                ready.waitForExistence(timeout: 1_800),
+                "The pinned inpainting package did not finish downloading"
+            )
+        }
+        XCTAssertTrue(app.staticTexts["9-channel SD 1.4-class pipeline"].exists)
+
+        // Keep the production default of 20 steps. Four steps is useful for a
+        // wiring smoke test, but cannot establish object-level edit quality.
+        let settings = app.buttons["inpainting-settings-button"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
+        let stepper = app.steppers["inpainting-steps-stepper"]
+        XCTAssertTrue(stepper.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["20 steps"].exists)
+        app.buttons["Done"].tap()
+
+        let generate = app.buttons["inpainting-generate-button"]
+        XCTAssertTrue(generate.waitForExistence(timeout: 5))
+        XCTAssertTrue(generate.isEnabled)
+        generate.tap()
+
+        let cancel = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] 'Cancel'")
+        ).firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 60))
+        let finished = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: cancel
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [finished], timeout: 1_200),
+            .completed,
+            "Inpainting did not finish on the physical device"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+
+        app.tabBars.buttons["Library"].tap()
+        let newestArtwork = app.buttons["artwork-tile"].firstMatch
+        XCTAssertTrue(newestArtwork.waitForExistence(timeout: 15))
+        newestArtwork.tap()
+        XCTAssertTrue(
+            app.staticTexts[
+                "a small orange tabby cat sitting naturally in the doorway, detailed photography"
+            ].waitForExistence(timeout: 5),
+            "The newest Library item should be the completed object inpainting"
+        )
     }
 }

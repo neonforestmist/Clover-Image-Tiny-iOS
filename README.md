@@ -97,6 +97,13 @@ Generation defaults to DPM-Solver++, 20 steps, CFG 6.0, live previews every
 five steps, and a focused crop with a 96-pixel context margin. Final output is
 composited through the exact mask so unpainted pixels stay unchanged.
 
+The native editor includes Paint and Erase tools, adjustable brush size,
+Undo/Redo, and Clear Mask. Imported images open in a square crop editor with
+drag-to-position, 1×–4× zoom, rule-of-thirds grid, reset, and a precise
+512×512 preview. Cropping is non-destructive until **Use Crop** is tapped.
+When a pinned model revision changes, verified files that are unchanged are
+reused locally and only changed resources are downloaded.
+
 ```swift
 let service = CoreMLInpaintingService()
 var settings = GenerationSettings()

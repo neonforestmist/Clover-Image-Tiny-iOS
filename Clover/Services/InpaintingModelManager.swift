@@ -136,6 +136,22 @@ final class InpaintingModelDownloader: Sendable {
                 continue
             }
 
+            // A revision marker is the source of truth for the complete
+            // installation, but individual files from an older installation
+            // can still be reused after they pass the new manifest checksum.
+            // This makes v2 upgrades resumable and avoids downloading shared
+            // text encoder, VAE, and safety-checker weights again.
+            let previousResource = finalURL.appending(path: resource.path)
+            if try isValid(resource: resource, at: previousResource) {
+                try copyVerifiedResource(
+                    from: previousResource,
+                    to: destination
+                )
+                completedBytes += resource.size
+                progress(fraction(completedBytes, manifest.totalSize))
+                continue
+            }
+
             let baseCompleted = completedBytes
             let operation = InpaintingFileDownloadOperation()
             try await operation.download(
@@ -179,6 +195,20 @@ final class InpaintingModelDownloader: Sendable {
         try FileManager.default.moveItem(at: stagingURL, to: finalURL)
         progress(1)
         return finalURL
+    }
+
+    private func copyVerifiedResource(
+        from source: URL,
+        to destination: URL
+    ) throws {
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: source, to: destination)
     }
 
     private func isValid(
