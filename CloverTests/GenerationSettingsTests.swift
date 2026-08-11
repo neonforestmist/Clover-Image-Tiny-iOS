@@ -473,43 +473,40 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertFalse(message.localizedCaseInsensitiveContains("safety"))
     }
 
-    func testSafetyCheckerSchemeArgumentEnablesOverride() {
-        XCTAssertTrue(
-            SafetyCheckerPolicy.resolve(
-                arguments: ["Clover", "-DisableSafetyChecker", "YES"],
-                storedValue: false
-            )
+    func testCreateSafetyCheckerIsDisabledByConstruction() {
+        XCTAssertFalse(CreateRuntimePolicy.isSafetyCheckerEnabled)
+    }
+
+    func testGenerationActivityExplainsPostDenoisingWork() {
+        XCTAssertEqual(
+            GenerationActivity.decoding(
+                imageIndex: 0,
+                imageCount: 1
+            ).title,
+            "Decoding final image…"
         )
-        XCTAssertTrue(
-            SafetyCheckerPolicy.resolve(
-                arguments: ["Clover", "-DisableSafetyChecker"],
-                storedValue: false
-            )
+        XCTAssertEqual(
+            GenerationActivity.validating.title,
+            "Checking final image…"
+        )
+        XCTAssertEqual(
+            GenerationActivity.saving.title,
+            "Saving to Library…"
+        )
+        XCTAssertEqual(
+            GenerationActivity.retryingEdit(attempt: 2, attemptCount: 3).title,
+            "Retrying edit · Attempt 2 of 3…"
         )
     }
 
-    func testSafetyCheckerSchemeArgumentCanExplicitlyDisableOverride() {
-        XCTAssertFalse(
-            SafetyCheckerPolicy.resolve(
-                arguments: ["Clover", "-DisableSafetyChecker", "NO"],
-                storedValue: true
-            )
+    func testGenerationUpdatesNeverExposeOneHundredPercentWhileWorking() {
+        let update = GenerationUpdate(
+            progress: 1,
+            preview: nil,
+            activity: .saving
         )
-    }
 
-    func testSafetyCheckerUsesStoredDefaultWithoutSchemeArgument() {
-        XCTAssertFalse(
-            SafetyCheckerPolicy.resolve(
-                arguments: ["Clover"],
-                storedValue: false
-            )
-        )
-        XCTAssertTrue(
-            SafetyCheckerPolicy.resolve(
-                arguments: ["Clover"],
-                storedValue: true
-            )
-        )
+        XCTAssertEqual(update.progress, 0.99)
     }
 
     func testPreviouslySavedAspectRatioFieldsAreIgnored() throws {

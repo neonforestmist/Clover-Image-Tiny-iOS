@@ -545,7 +545,6 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         var storedPreviews: [GeneratedPreviewFrame] = []
         var images: [CGImage] = []
         var resolvedSeed = settings.seed
-        var safetyFilteredOutput = false
         var reportedProgress = 0.0
 
         // A small subset of seeds can collapse this compact 9-channel U-Net
@@ -625,7 +624,20 @@ final class CoreMLInpaintingService: @unchecked Sendable {
                 progress(
                     GenerationUpdate(
                         progress: reportedProgress,
-                        preview: preview
+                        preview: preview,
+                        activity: completedStep >= requestedStepCount
+                            ? .decoding(imageIndex: 0, imageCount: 1)
+                            : attempt > 0
+                            ? .retryingEdit(
+                                attempt: attempt + 1,
+                                attemptCount: InpaintingRuntimePolicy.generationAttemptCount
+                            )
+                            : .denoising(
+                                step: completedStep,
+                                stepCount: requestedStepCount,
+                                imageIndex: 0,
+                                imageCount: 1
+                            )
                     )
                 )
                 return !cancellation.isCancelled
@@ -633,8 +645,13 @@ final class CoreMLInpaintingService: @unchecked Sendable {
             guard !cancellation.isCancelled else {
                 throw GenerationError.cancelled
             }
-            safetyFilteredOutput = safetyFilteredOutput
-                || generated.contains { $0 == nil }
+            progress(
+                GenerationUpdate(
+                    progress: 0.96,
+                    preview: nil,
+                    activity: .compositing
+                )
+            )
             images = generated.compactMap { optionalImage -> CGImage? in
                 guard let image = optionalImage else { return nil }
                 guard InpaintingImageComposer.hasUsableMaskedContent(
@@ -655,9 +672,6 @@ final class CoreMLInpaintingService: @unchecked Sendable {
             }
         }
         guard !images.isEmpty else {
-            if safetyFilteredOutput, !generation.disableSafety {
-                throw GenerationError.noImages
-            }
             throw GenerationError.unusableInpaintingOutput
         }
         return GenerationResult(

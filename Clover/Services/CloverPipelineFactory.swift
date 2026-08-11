@@ -16,52 +16,20 @@ enum CloverPipelineError: LocalizedError {
     }
 }
 
-enum SafetyCheckerPolicy {
-    static let overrideKey = "DisableSafetyChecker"
-
-    static var current: Bool {
-        resolve(
-            arguments: ProcessInfo.processInfo.arguments,
-            storedValue: UserDefaults.standard.bool(forKey: overrideKey)
-        )
-    }
-
-    static func resolve(
-        arguments: [String],
-        storedValue: Bool
-    ) -> Bool {
-        let flag = "-\(overrideKey)"
-        guard let index = arguments.lastIndex(of: flag) else {
-            return storedValue
-        }
-        let valueIndex = arguments.index(after: index)
-        guard arguments.indices.contains(valueIndex) else {
-            return true
-        }
-        switch arguments[valueIndex].lowercased() {
-        case "1", "true", "yes":
-            return true
-        case "0", "false", "no":
-            return false
-        default:
-            return storedValue
-        }
-    }
+enum CreateRuntimePolicy {
+    /// Create is safety-free by construction so a valid decoded image cannot
+    /// disappear after the user has already watched denoising previews.
+    static let isSafetyCheckerEnabled = false
 }
 
 enum InpaintingRuntimePolicy {
     /// Inpainting edits user-selected pixels in a source image. Keeping this
-    /// false by construction avoids a late safety-filter nil after previews
-    /// have already completed, regardless of the regular Create policy.
+    /// false by construction avoids a late safety-filter nil after previews.
     static let isSafetyCheckerEnabled = false
     static let generationAttemptCount = 3
 }
 
 enum CloverPipelineFactory {
-    /// Captured once so model construction and decode always agree, even if
-    /// defaults are mutated while a long generation is running.
-    static let isSafetyCheckerDisabled = SafetyCheckerPolicy.current
-
     static func make(
         resourcesURL: URL,
         styleWeightsURL: URL? = nil,
@@ -202,32 +170,13 @@ enum CloverPipelineFactory {
             modelAt: urls.decoderURL,
             configuration: configuration
         )
-        let safetyChecker = makeSafetyChecker(
-            at: urls.safetyCheckerURL,
-            configuration: configuration
-        )
-
         return StableDiffusionPipeline(
             textEncoder: textEncoder,
             unet: unet,
             decoder: decoder,
             encoder: nil,
-            safetyChecker: safetyChecker,
+            safetyChecker: nil,
             reduceMemory: true
-        )
-    }
-
-    private static func makeSafetyChecker(
-        at url: URL,
-        configuration: MLModelConfiguration
-    ) -> SafetyChecker? {
-        guard !isSafetyCheckerDisabled,
-              FileManager.default.fileExists(atPath: url.path) else {
-            return nil
-        }
-        return SafetyChecker(
-            modelAt: url,
-            configuration: configuration
         )
     }
 }

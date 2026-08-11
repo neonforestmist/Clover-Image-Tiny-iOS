@@ -20,6 +20,7 @@ final class GenerationStore {
 
     var settings = GenerationSettings.restored()
     private(set) var phase = Phase.idle
+    private(set) var activity = GenerationActivity.loadingModel
     private(set) var latest: [Artwork] = []
     private(set) var preview: GenerationPreview?
     var presentedSheet: SheetDestination?
@@ -40,6 +41,7 @@ final class GenerationStore {
 
         settings.persist()
         phase = .preparing
+        activity = .loadingModel
         preview = nil
         errorMessage = nil
         let request = settings
@@ -55,6 +57,7 @@ final class GenerationStore {
                 ) { update in
                     Task { @MainActor [self] in
                         self.phase = .generating(update.progress)
+                        self.activity = update.activity
                         if let preview = update.preview {
                             self.preview = preview
                         }
@@ -62,6 +65,8 @@ final class GenerationStore {
                 }
 
                 guard !Task.isCancelled else { return }
+                phase = .generating(0.98)
+                activity = .saving
                 latest = try library.add(
                     images: result.images,
                     previewFrames: result.previewFrames,

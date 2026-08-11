@@ -6,6 +6,7 @@ struct OutputCanvas: View {
     let artworks: [Artwork]
     let phase: GenerationStore.Phase
     let preview: GenerationPreview?
+    let activity: GenerationActivity
 
     @State private var selection = 0
     @State private var frameSelection = 0
@@ -108,11 +109,11 @@ struct OutputCanvas: View {
 
     private var loadingOverlay: some View {
         Group {
-            if let preview {
+            if preview != nil {
                 VStack {
                     Spacer()
                     Label(
-                        "Image \(preview.imageIndex + 1) · Step \(preview.step) of \(preview.stepCount)",
+                        activity.title,
                         systemImage: "sparkles"
                     )
                     .font(.caption.weight(.semibold))
@@ -129,7 +130,7 @@ struct OutputCanvas: View {
                     VStack(spacing: 12) {
                         ProgressView()
                             .controlSize(.large)
-                        Text(phase == .preparing ? "Preparing model…" : "Creating locally…")
+                        Text(phase == .preparing ? "Preparing model…" : activity.title)
                             .font(.subheadline.weight(.medium))
                     }
                 }

@@ -171,7 +171,7 @@ final class CloverUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "-DisableSafetyChecker",
-            "YES",
+            "NO",
             "-ui-testing-real-model",
         ]
         app.launch()

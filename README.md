@@ -189,26 +189,14 @@ Iconify. See [THIRD_PARTY_ASSETS.md](THIRD_PARTY_ASSETS.md) for attribution.
 
 ### Safety-checker behavior
 
-The Inpainting pipeline does not construct or run a safety checker. This is a
-fixed runtime policy, not a UI setting, so a valid edit cannot be discarded
-after live previews finish. Regular Create retains its packaged safety checker
-unless the local development override below is used.
+Regular Create and Inpainting do not construct or run a safety checker. This
+is a fixed runtime policy rather than a UI or scheme setting, so a valid image
+cannot be discarded after live previews finish.
 
-#### Local Regular Create override
-
-Safety checking is enabled by default. To disable it only for a local Xcode
-run, duplicate the `Clover` scheme, make the duplicate unshared, then add this
-Run argument:
-
-```text
--DisableSafetyChecker YES
-```
-
-The unshared scheme is stored under `xcuserdata` and is not staged to GitHub.
-The override is captured when Clover launches; Regular Create model
-construction and final decode use the same value. Without this argument,
-Regular Create safety checking remains enabled. It has no effect on
-Inpainting, whose safety checker is always absent.
+Generation progress reserves its final portion for work after denoising. The
+bottom status now reports **Decoding final image**, **Checking final image**,
+**Applying the exact mask** (Inpainting), and **Saving to Library** instead of
+showing 100% while Core ML and local persistence are still working.
 
 If an inpainting seed produces a collapsed black/invalid edit, Clover retries
 up to two more times with deterministic follow-up seeds. The seed that actually

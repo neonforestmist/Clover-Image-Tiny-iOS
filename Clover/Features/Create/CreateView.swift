@@ -32,7 +32,8 @@ struct CreateView: View {
                 OutputCanvas(
                     artworks: store.latest,
                     phase: store.phase,
-                    preview: store.preview
+                    preview: store.preview,
+                    activity: store.activity
                 )
 
                 modelButton
@@ -249,9 +250,11 @@ struct CreateView: View {
     private var generationAction: some View {
         VStack(spacing: 8) {
             if case let .generating(progress) = store.phase {
-                ProgressView(value: progress)
-                    .tint(.cloverGreen)
-                    .accessibilityLabel("Generation progress")
+                GenerationProgressStatus(
+                    progress: progress,
+                    activity: store.activity
+                )
+                .accessibilityIdentifier("generation-stage")
             }
 
             if store.phase.isWorking {
@@ -265,27 +268,22 @@ struct CreateView: View {
                 .controlSize(.large)
             } else {
                 if modelManager.isInstalled(store.settings.modelID) {
-                    Button {
+                    PrimaryGenerationButton(
+                        title: "Generate",
+                        systemImage: "wand.and.stars",
+                        isEnabled: !store.settings.trimmedPrompt.isEmpty
+                    ) {
                         focusedField = nil
                         store.generate()
-                    } label: {
-                        Label("Generate", systemImage: "wand.and.stars")
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(store.settings.trimmedPrompt.isEmpty)
                     .accessibilityIdentifier("generate-button")
                 } else {
-                    Button {} label: {
-                        Label("Generate", systemImage: "wand.and.stars")
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(true)
+                    PrimaryGenerationButton(
+                        title: "Generate",
+                        systemImage: "wand.and.stars",
+                        isEnabled: false,
+                        action: {}
+                    )
                     .accessibilityIdentifier("generate-button")
                 }
             }
@@ -297,8 +295,8 @@ struct CreateView: View {
         switch store.phase {
         case .preparing:
             "Preparing model…"
-        case let .generating(progress):
-            "Generating \(Int(progress * 100))% · Cancel"
+        case .generating:
+            "Cancel"
         case .idle, .finished:
             "Cancel"
         }
@@ -328,6 +326,69 @@ struct CreateView: View {
             }
         case .failed:
             "Download needs attention"
+        }
+    }
+}
+
+struct PrimaryGenerationButton: View {
+    let title: String
+    let systemImage: String
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .fontWeight(.semibold)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(CloverPrimaryActionButtonStyle())
+        .disabled(!isEnabled)
+    }
+}
+
+private struct CloverPrimaryActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? Color.white : Color.secondary)
+            .padding(.vertical, 13)
+            .background {
+                Capsule()
+                    .fill(
+                        isEnabled
+                            ? Color.accentColor.opacity(configuration.isPressed ? 0.78 : 1)
+                            : Color.secondary.opacity(0.18)
+                    )
+            }
+            .contentShape(.capsule)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+struct GenerationProgressStatus: View {
+    let progress: Double
+    let activity: GenerationActivity
+
+    var body: some View {
+        VStack(spacing: 5) {
+            HStack(spacing: 8) {
+                Text(activity.title)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
+                Text(progress, format: .percent.precision(.fractionLength(0)))
+                    .monospacedDigit()
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+            ProgressView(value: progress)
+                .tint(.cloverGreen)
+                .accessibilityLabel("Generation progress")
+                .accessibilityValue("\(Int(progress * 100)) percent")
         }
     }
 }

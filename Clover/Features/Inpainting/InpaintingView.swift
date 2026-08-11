@@ -16,6 +16,7 @@ struct InpaintingView: View {
     @State private var presentedSheet: InpaintingSheet?
     @State private var isWorking = false
     @State private var progress = 0.0
+    @State private var activity = GenerationActivity.loadingModel
     @State private var preview: GenerationPreview?
     @State private var errorMessage: String?
     @State private var cancellation: GenerationCancellationToken?
@@ -63,6 +64,9 @@ struct InpaintingView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             actionBar
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
         }
         .sheet(item: $presentedSheet) { destination in
             switch destination {
@@ -401,9 +405,11 @@ struct InpaintingView: View {
     private var actionBar: some View {
         VStack(spacing: 8) {
             if isWorking {
-                ProgressView(value: progress)
-                    .tint(.cloverGreen)
-                    .accessibilityLabel("Inpainting progress")
+                GenerationProgressStatus(
+                    progress: progress,
+                    activity: activity
+                )
+                .accessibilityIdentifier("inpainting-generation-stage")
 
                 Button(role: .cancel) {
                     cancellation?.cancel()
@@ -415,23 +421,17 @@ struct InpaintingView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.large)
             } else {
-                Button {
+                PrimaryGenerationButton(
+                    title: "Inpaint",
+                    systemImage: "pencil.and.outline",
+                    isEnabled: canGenerate
+                ) {
                     startGeneration()
-                } label: {
-                    Label("Inpaint", systemImage: "pencil.and.outline")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(!canGenerate)
                 .accessibilityIdentifier("inpainting-generate-button")
             }
         }
-        .padding(.horizontal)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
-        .background(.bar)
+        .padding(.top, 4)
     }
 
     private var canGenerate: Bool {
@@ -564,6 +564,7 @@ struct InpaintingView: View {
         activeGenerationID = generationID
         isWorking = true
         progress = 0
+        activity = .loadingModel
         preview = nil
         errorMessage = nil
 
@@ -578,6 +579,7 @@ struct InpaintingView: View {
                     Task { @MainActor in
                         guard activeGenerationID == generationID else { return }
                         progress = update.progress
+                        activity = update.activity
                         if let updatePreview = update.preview {
                             preview = updatePreview
                         }
@@ -598,6 +600,8 @@ struct InpaintingView: View {
                     persistedSettings.seed = resolvedSeed
                     settings.seed = resolvedSeed
                 }
+                progress = 0.98
+                activity = .saving
                 _ = try library.add(
                     images: result.images,
                     previewFrames: result.previewFrames,

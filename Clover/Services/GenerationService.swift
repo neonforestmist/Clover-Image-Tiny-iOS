@@ -39,9 +39,62 @@ struct GenerationPreview: @unchecked Sendable {
     let imageIndex: Int
 }
 
+enum GenerationActivity: Equatable, Sendable {
+    case loadingModel
+    case denoising(
+        step: Int,
+        stepCount: Int,
+        imageIndex: Int,
+        imageCount: Int
+    )
+    case decoding(imageIndex: Int, imageCount: Int)
+    case retryingEdit(attempt: Int, attemptCount: Int)
+    case validating
+    case compositing
+    case saving
+
+    var title: String {
+        switch self {
+        case .loadingModel:
+            "Loading model locally…"
+        case let .denoising(step, stepCount, imageIndex, imageCount):
+            if imageCount > 1 {
+                "Denoising image \(imageIndex + 1) of \(imageCount) · Step \(step) of \(stepCount)"
+            } else {
+                "Denoising · Step \(step) of \(stepCount)"
+            }
+        case let .decoding(imageIndex, imageCount):
+            if imageCount > 1 {
+                "Decoding image \(imageIndex + 1) of \(imageCount)…"
+            } else {
+                "Decoding final image…"
+            }
+        case let .retryingEdit(attempt, attemptCount):
+            "Retrying edit · Attempt \(attempt) of \(attemptCount)…"
+        case .validating:
+            "Checking final image…"
+        case .compositing:
+            "Applying the exact mask…"
+        case .saving:
+            "Saving to Library…"
+        }
+    }
+}
+
 struct GenerationUpdate: @unchecked Sendable {
     let progress: Double
     let preview: GenerationPreview?
+    let activity: GenerationActivity
+
+    init(
+        progress: Double,
+        preview: GenerationPreview?,
+        activity: GenerationActivity
+    ) {
+        self.progress = min(max(progress, 0), 0.99)
+        self.preview = preview
+        self.activity = activity
+    }
 }
 
 enum GenerationError: LocalizedError {
@@ -199,8 +252,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
         configuration.schedulerType = settings.scheduler.coreMLScheduler
         configuration.rngType = settings.randomGenerator.coreMLRandomGenerator
         configuration.useDenoisedIntermediates = settings.livePreviewEnabled
-        configuration.disableSafety = CloverPipelineFactory
-            .isSafetyCheckerDisabled
+        configuration.disableSafety = !CreateRuntimePolicy.isSafetyCheckerEnabled
 
         defer { pipeline.unloadResources() }
 
@@ -231,8 +283,11 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                     )
                     let imageProgress = Double(schedulerStep)
                         / Double(schedulerStepCount)
+                    // Denoising owns 90% of each image's progress slice.
+                    // Core ML still needs to decode and validate after the
+                    // scheduler reports its final step.
                     let totalProgress = (
-                        Double(imageIndex) + imageProgress
+                        Double(imageIndex) + imageProgress * 0.9
                     ) / Double(imageCount)
                     let previewInterval = min(
                         min(max(settings.previewInterval, 1), 10),
@@ -279,12 +334,32 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
                     progress(
                         GenerationUpdate(
                             progress: totalProgress,
-                            preview: preview
+                            preview: preview,
+                            activity: completedStep >= requestedStepCount
+                                ? .decoding(
+                                    imageIndex: imageIndex,
+                                    imageCount: imageCount
+                                )
+                                : .denoising(
+                                    step: completedStep,
+                                    stepCount: requestedStepCount,
+                                    imageIndex: imageIndex,
+                                    imageCount: imageCount
+                                )
                         )
                     )
                     return !cancellation.isCancelled
                 }
             }
+            progress(
+                GenerationUpdate(
+                    progress: (
+                        Double(imageIndex) + 0.96
+                    ) / Double(imageCount),
+                    preview: nil,
+                    activity: .validating
+                )
+            )
             images.append(
                 contentsOf: generated.compactMap { image in
                     image.map {
@@ -304,7 +379,6 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
         guard !images.isEmpty else {
             throw GenerationError.noImages
         }
-        progress(GenerationUpdate(progress: 1, preview: nil))
         let safeImageIndices = Set(images.map(\.imageIndex))
         return GenerationResult(
             images: images,
@@ -477,7 +551,7 @@ final class PreviewGenerationService: ImageGenerating, @unchecked Sendable {
             }
             progress(
                 GenerationUpdate(
-                    progress: Double(completedStep) / Double(stepCount),
+                    progress: Double(completedStep) / Double(stepCount) * 0.9,
                     preview: shouldPreview
                         ? GenerationPreview(
                             cgImage: image,
@@ -485,10 +559,25 @@ final class PreviewGenerationService: ImageGenerating, @unchecked Sendable {
                             stepCount: stepCount,
                             imageIndex: 0
                         )
-                        : nil
+                        : nil,
+                    activity: completedStep == stepCount
+                        ? .decoding(imageIndex: 0, imageCount: settings.imageCount)
+                        : .denoising(
+                            step: completedStep,
+                            stepCount: stepCount,
+                            imageIndex: 0,
+                            imageCount: settings.imageCount
+                        )
                 )
             )
         }
+        progress(
+            GenerationUpdate(
+                progress: 0.96,
+                preview: nil,
+                activity: .validating
+            )
+        )
         return GenerationResult(
             images: (0..<settings.imageCount).map {
                 GeneratedImage(cgImage: image, imageIndex: $0)
