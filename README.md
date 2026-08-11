@@ -81,14 +81,21 @@ variants.
 ## Inpainting resources
 
 Inpainting is a separate, standalone Core ML pipeline because its U-Net has a
-9-channel input and needs a VAE encoder. It is an optional **1,670 MB** download;
+9-channel input and needs a VAE encoder. It is an optional **1,672 MB** download;
 installing the app or Regular Clover does not download it. Download the companion resource
 bundle from
 [`neonforestmist/Clover-Image-Tiny-Inpaint-CoreML`](https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML),
-or open the **Inpainting** tab and tap **Download 1,670 MB**. Clover fetches the
+or open the **Inpainting** tab and tap **Download 1,672 MB**. Clover fetches the
 repository manifest, verifies every resource by size and SHA-256, and stores
 the bundle at **On My iPhone → Clover → Models → Inpainting**. The
 runtime entry point is `CoreMLInpaintingService`:
+
+The v2 manifest is pinned to an immutable Hugging Face revision. Existing v1
+installations are detected by their missing/old revision marker and the app
+offers the v2 download instead of silently continuing to use stale weights.
+Generation defaults to DPM-Solver++, 20 steps, CFG 6.0, live previews every
+five steps, and a focused crop with a 96-pixel context margin. Final output is
+composited through the exact mask so unpainted pixels stay unchanged.
 
 ```swift
 let service = CoreMLInpaintingService()

@@ -125,6 +125,7 @@ final class InpaintingTests: XCTestCase {
 
         XCTAssertEqual(settings.scheduler, .dpmSolver)
         XCTAssertEqual(settings.stepCount, 20)
+        XCTAssertEqual(settings.guidanceScale, 6.0)
         XCTAssertTrue(settings.livePreviewEnabled)
         XCTAssertEqual(settings.previewInterval, 5)
     }
@@ -165,11 +166,60 @@ final class InpaintingTests: XCTestCase {
             minimumIOS: "18.0",
             resolution: [512, 512],
             resources: [
-                .init(path: "Unet.mlmodelc/model.mil", size: 1_670_353_234, sha256: "test")
+                .init(path: "Unet.mlmodelc/model.mil", size: 1_671_581_989, sha256: "test")
             ]
         )
 
-        XCTAssertEqual(manifest.totalSizeInMegabytes, "1,670 MB")
+        XCTAssertEqual(manifest.totalSizeInMegabytes, "1,672 MB")
+    }
+
+    func testInpaintingDownloadsUsePinnedCoreMLRevision() {
+        let manifest = InpaintingModelManifest(
+            schemaVersion: 1,
+            model: "test",
+            baseModel: "test",
+            minimumIOS: "18.0",
+            resolution: [512, 512],
+            resources: [
+                .init(path: "UnetChunk1.mlmodelc/model.mil", size: 1, sha256: "test")
+            ]
+        )
+
+        XCTAssertTrue(
+            InpaintingModelManifest.remoteURL.absoluteString.contains(
+                InpaintingModelManifest.repositoryRevision
+            )
+        )
+        XCTAssertTrue(
+            manifest.downloadURL(for: manifest.resources[0]).absoluteString.contains(
+                InpaintingModelManifest.repositoryRevision
+            )
+        )
+    }
+
+    func testInpaintingRevisionMarkerRejectsAnOlderInstalledModel() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: UUID().uuidString,
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let marker = directory.appending(
+            path: InpaintingModelManifest.revisionMarkerName
+        )
+        try "old-revision\n".write(to: marker, atomically: true, encoding: .utf8)
+        XCTAssertFalse(InpaintingModelManifest.isRevisionCurrent(at: directory))
+
+        try (InpaintingModelManifest.repositoryRevision + "\n").write(
+            to: marker,
+            atomically: true,
+            encoding: .utf8
+        )
+        XCTAssertTrue(InpaintingModelManifest.isRevisionCurrent(at: directory))
     }
 
     private func makeRGBAImage(

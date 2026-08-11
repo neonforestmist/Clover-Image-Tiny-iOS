@@ -95,6 +95,7 @@ struct GenerationSettings: Codable, Equatable, Sendable {
     static var inpaintingDefaults: Self {
         var settings = Self()
         settings.stepCount = 20
+        settings.guidanceScale = 6.0
         settings.scheduler = .dpmSolver
         settings.livePreviewEnabled = true
         settings.previewInterval = 5

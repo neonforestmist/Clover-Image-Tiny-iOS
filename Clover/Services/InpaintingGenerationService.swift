@@ -50,7 +50,7 @@ enum InpaintingImageComposer {
         let largestMaskSide = max(bounds.width, bounds.height)
         let cropSide = min(
             min(image.width, image.height),
-            max(192, Int(largestMaskSide) + 128)
+            max(192, Int(largestMaskSide) + 192)
         )
         guard cropSide < min(image.width, image.height) - 16 else {
             return InpaintingPreparedInput(

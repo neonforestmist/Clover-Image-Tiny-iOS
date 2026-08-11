@@ -25,9 +25,29 @@ struct InpaintingModelManifest: Codable, Sendable {
         case resources
     }
 
+    static let repositoryRevision = "4ac712613e1599b616fa2ca94e24c06bfe110fca"
+    static let revisionMarkerName = ".clover-inpainting-revision"
+
     static let remoteURL = URL(
-        string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML/resolve/main/manifest.json"
+        string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML/resolve/\(repositoryRevision)/manifest.json"
     )!
+
+    static func isRevisionCurrent(at resourcesURL: URL) -> Bool {
+        let markerURL = resourcesURL.appending(path: revisionMarkerName)
+        guard let storedRevision = try? String(
+            contentsOf: markerURL,
+            encoding: .utf8
+        ) else {
+            return false
+        }
+        return storedRevision.trimmingCharacters(in: .whitespacesAndNewlines)
+            == repositoryRevision
+    }
+
+    static var hasCurrentInstallation: Bool {
+        ModelStorage.hasInpaintingResources
+            && isRevisionCurrent(at: ModelStorage.inpaintingResourcesURL)
+    }
 
     var totalSize: Int64 {
         resources.reduce(0) { $0 + $1.size }
@@ -40,7 +60,7 @@ struct InpaintingModelManifest: Codable, Sendable {
 
     func downloadURL(for resource: Resource) -> URL {
         var components = URLComponents(
-            string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML/resolve/main/\(resource.path)"
+            string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML/resolve/\(Self.repositoryRevision)/\(resource.path)"
         )!
         components.queryItems = [
             URLQueryItem(name: "download", value: "true")
@@ -146,6 +166,13 @@ final class InpaintingModelDownloader: Sendable {
               FileManager.default.fileExists(atPath: stagingURL.path) else {
             throw InpaintingModelError.incompletePackage
         }
+        try (InpaintingModelManifest.repositoryRevision + "\n").write(
+            to: stagingURL.appending(
+                path: InpaintingModelManifest.revisionMarkerName
+            ),
+            atomically: true,
+            encoding: .utf8
+        )
         if FileManager.default.fileExists(atPath: finalURL.path) {
             try FileManager.default.removeItem(at: finalURL)
         }
@@ -216,17 +243,17 @@ final class InpaintingModelManager {
     private var task: Task<Void, Never>?
 
     init() {
-        state = ModelStorage.hasInpaintingResources
+        state = InpaintingModelManifest.hasCurrentInstallation
             ? .installed
             : .notInstalled
     }
 
     var isInstalled: Bool {
-        state == .installed && ModelStorage.hasInpaintingResources
+        state == .installed && InpaintingModelManifest.hasCurrentInstallation
     }
 
     func refresh() async {
-        if ModelStorage.hasInpaintingResources {
+        if InpaintingModelManifest.hasCurrentInstallation {
             state = .installed
             return
         }
@@ -259,7 +286,7 @@ final class InpaintingModelManager {
                 }
                 state = .installed
             } catch is CancellationError {
-                state = ModelStorage.hasInpaintingResources
+                state = InpaintingModelManifest.hasCurrentInstallation
                     ? .installed
                     : .notInstalled
             } catch {
@@ -272,7 +299,7 @@ final class InpaintingModelManager {
     func cancel() {
         task?.cancel()
         task = nil
-        if !ModelStorage.hasInpaintingResources {
+        if !InpaintingModelManifest.hasCurrentInstallation {
             state = .notInstalled
         }
     }
