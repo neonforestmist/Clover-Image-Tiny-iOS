@@ -81,10 +81,11 @@ variants.
 ## Inpainting resources
 
 Inpainting is a separate, standalone Core ML pipeline because its U-Net has a
-9-channel input and needs a VAE encoder. Download the companion resource
+9-channel input and needs a VAE encoder. It is an optional **1,670 MB** download;
+installing the app or Regular Clover does not download it. Download the companion resource
 bundle from
 [`neonforestmist/Clover-Image-Tiny-Inpaint-CoreML`](https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML),
-or open the **Inpainting** tab and tap **Download**. Clover fetches the
+or open the **Inpainting** tab and tap **Download 1,670 MB**. Clover fetches the
 repository manifest, verifies every resource by size and SHA-256, and stores
 the bundle at **On My iPhone → Clover → Models → Inpainting**. The
 runtime entry point is `CoreMLInpaintingService`:
@@ -104,9 +105,19 @@ let result = try await service.generate(
 
 The service encodes the masked image locally, sends
 `[noisy latent, mask, masked-image latent]` to the batch-one U-Net, and
-composites untouched pixels from the original image. The bundle is converted
+composites untouched pixels from the original image. Small masks are cropped
+with surrounding context for 512×512 inference and then mapped back through
+the exact mask, so object edits receive useful latent resolution without
+changing unpainted pixels. Inpainting uses DPM-Solver++ by default; 20 steps is
+recommended and 50 is the on-device maximum. The bundle is converted
 for the SD 1.4-class 512×512 architecture on iOS 18; validate final latency
 and memory on a physical device rather than Simulator.
+
+The current Inpainting U-Net does not expose Clover's dynamic LoRA state.
+Regular Clover LoRA files target its 4-channel U-Net and are not interchangeable
+with this 9-channel model. An inpainting-specific LoRA can be fused before a
+separate Core ML conversion, but dynamic Inpainting LoRA selection is not
+included in this release.
 
 ## On-device behavior
 

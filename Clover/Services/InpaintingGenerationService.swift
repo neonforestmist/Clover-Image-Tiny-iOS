@@ -18,7 +18,86 @@ struct InpaintingRequest: @unchecked Sendable {
     let mask: CGImage
 }
 
+struct InpaintingPreparedInput: @unchecked Sendable {
+    let image: CGImage
+    let mask: CGImage
+    let cropRect: CGRect
+}
+
 enum InpaintingImageComposer {
+    static let inferenceSize = 512
+
+    /// Gives small edits enough latent resolution by cropping a square region
+    /// around the mask before inference. The crop still includes generous
+    /// surrounding context and is mapped back through `compositeFocused`.
+    static func prepareFocusedInput(
+        image: CGImage,
+        mask: CGImage
+    ) -> InpaintingPreparedInput? {
+        guard image.width == mask.width,
+              image.height == mask.height,
+              let maskBuffer = grayBuffer(for: mask),
+              let bounds = whiteMaskBounds(maskBuffer) else {
+            return nil
+        }
+
+        let fullRect = CGRect(
+            x: 0,
+            y: 0,
+            width: image.width,
+            height: image.height
+        )
+        let largestMaskSide = max(bounds.width, bounds.height)
+        let cropSide = min(
+            min(image.width, image.height),
+            max(192, Int(largestMaskSide) + 128)
+        )
+        guard cropSide < min(image.width, image.height) - 16 else {
+            return InpaintingPreparedInput(
+                image: image,
+                mask: mask,
+                cropRect: fullRect
+            )
+        }
+
+        let centerX = Int(bounds.midX.rounded())
+        let centerY = Int(bounds.midY.rounded())
+        let originX = min(
+            max(centerX - cropSide / 2, 0),
+            image.width - cropSide
+        )
+        let originY = min(
+            max(centerY - cropSide / 2, 0),
+            image.height - cropSide
+        )
+        let cropRect = CGRect(
+            x: originX,
+            y: originY,
+            width: cropSide,
+            height: cropSide
+        )
+        guard let croppedImage = image.cropping(to: cropRect),
+              let croppedMask = mask.cropping(to: cropRect),
+              let preparedImage = resized(
+                  croppedImage,
+                  width: inferenceSize,
+                  height: inferenceSize
+              ),
+              let preparedMask = resized(
+                  croppedMask,
+                  width: inferenceSize,
+                  height: inferenceSize,
+                  grayscale: true
+              ) else {
+            return nil
+        }
+        return InpaintingPreparedInput(
+            image: preparedImage,
+            mask: preparedMask,
+            cropRect: cropRect
+        )
+    }
+
     /// Returns the conditioning image expected by a Stable Diffusion inpaint
     /// U-Net: original pixels outside the mask and black pixels inside it.
     static func maskedImage(
@@ -66,6 +145,107 @@ enum InpaintingImageComposer {
             }
         }
         return output.makeImage()
+    }
+
+    /// Maps a generated focus crop back to the source image while changing
+    /// only pixels selected by the original white mask.
+    static func compositeFocused(
+        original image: CGImage,
+        generated: CGImage,
+        mask: CGImage,
+        cropRect: CGRect,
+        featherRadius: Int = 10
+    ) -> CGImage? {
+        let fullRect = CGRect(
+            x: 0,
+            y: 0,
+            width: image.width,
+            height: image.height
+        )
+        if cropRect.equalTo(fullRect) {
+            guard let output = rgbaBuffer(for: generated),
+                  let original = rgbaBuffer(for: image),
+                  let maskBuffer = grayBuffer(for: mask) else {
+                return nil
+            }
+            blend(
+                output: output,
+                original: original,
+                generated: output,
+                mask: feathered(maskBuffer, radius: featherRadius)
+            )
+            return output.makeImage()
+        }
+
+        let cropWidth = Int(cropRect.width)
+        let cropHeight = Int(cropRect.height)
+        guard let generatedCrop = resized(
+            generated,
+            width: cropWidth,
+            height: cropHeight
+        ),
+        let output = rgbaBuffer(for: image),
+        let generatedBuffer = rgbaBuffer(for: generatedCrop),
+        let maskBuffer = grayBuffer(for: mask) else {
+            return nil
+        }
+
+        let originX = Int(cropRect.origin.x)
+        let originY = Int(cropRect.origin.y)
+        let featheredMask = feathered(maskBuffer, radius: featherRadius)
+        for cropY in 0..<cropHeight {
+            let imageY = originY + cropY
+            for cropX in 0..<cropWidth {
+                let imageX = originX + cropX
+                let imageIndex = imageY * image.width + imageX
+                let alpha = Int(featheredMask.bytes[imageIndex])
+                guard alpha > 0 else { continue }
+                let cropIndex = cropY * cropWidth + cropX
+                for channel in 0..<3 {
+                    let originalValue = Int(output.bytes[imageIndex * 4 + channel])
+                    let generatedValue = Int(
+                        generatedBuffer.bytes[cropIndex * 4 + channel]
+                    )
+                    output.bytes[imageIndex * 4 + channel] = UInt8(
+                        (generatedValue * alpha
+                            + originalValue * (255 - alpha)
+                            + 127) / 255
+                    )
+                }
+            }
+        }
+        return output.makeImage()
+    }
+
+    /// Rejects the known failed-sampler output: a nearly solid black masked
+    /// region. Keeping this check before compositing prevents a bad render
+    /// from replacing the editor canvas.
+    static func hasUsableMaskedContent(
+        generated: CGImage,
+        mask: CGImage
+    ) -> Bool {
+        guard let output = rgbaBuffer(for: generated),
+              let maskBuffer = grayBuffer(for: mask),
+              output.width == maskBuffer.width,
+              output.height == maskBuffer.height else {
+            return false
+        }
+
+        var maskedPixelCount = 0
+        var nearlyBlackPixelCount = 0
+        for index in 0..<(output.width * output.height)
+        where maskBuffer.bytes[index] >= 128 {
+            maskedPixelCount += 1
+            let offset = index * 4
+            if output.bytes[offset] <= 4,
+               output.bytes[offset + 1] <= 4,
+               output.bytes[offset + 2] <= 4 {
+                nearlyBlackPixelCount += 1
+            }
+        }
+
+        guard maskedPixelCount > 0 else { return false }
+        return Double(nearlyBlackPixelCount) / Double(maskedPixelCount) < 0.98
     }
 
     private final class RGBA: @unchecked Sendable {
@@ -132,6 +312,132 @@ enum InpaintingImageComposer {
             bytes: Array(UnsafeBufferPointer(start: data, count: width * height))
         )
     }
+
+    private static func whiteMaskBounds(_ mask: GrayBuffer) -> CGRect? {
+        var minX = mask.width
+        var minY = mask.height
+        var maxX = -1
+        var maxY = -1
+        for y in 0..<mask.height {
+            for x in 0..<mask.width
+            where mask.bytes[y * mask.width + x] >= 128 {
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return nil }
+        return CGRect(
+            x: minX,
+            y: minY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1
+        )
+    }
+
+    private static func feathered(
+        _ mask: GrayBuffer,
+        radius: Int
+    ) -> GrayBuffer {
+        guard radius > 1 else { return mask }
+        let count = mask.width * mask.height
+        let far = mask.width + mask.height
+        var distances = [Int](repeating: far, count: count)
+
+        for y in 0..<mask.height {
+            for x in 0..<mask.width {
+                let index = y * mask.width + x
+                guard mask.bytes[index] >= 128 else {
+                    distances[index] = 0
+                    continue
+                }
+                if x > 0 {
+                    distances[index] = min(distances[index], distances[index - 1] + 1)
+                }
+                if y > 0 {
+                    distances[index] = min(
+                        distances[index],
+                        distances[index - mask.width] + 1
+                    )
+                }
+            }
+        }
+        for y in stride(from: mask.height - 1, through: 0, by: -1) {
+            for x in stride(from: mask.width - 1, through: 0, by: -1) {
+                let index = y * mask.width + x
+                guard distances[index] > 0 else { continue }
+                if x + 1 < mask.width {
+                    distances[index] = min(distances[index], distances[index + 1] + 1)
+                }
+                if y + 1 < mask.height {
+                    distances[index] = min(
+                        distances[index],
+                        distances[index + mask.width] + 1
+                    )
+                }
+            }
+        }
+
+        return GrayBuffer(
+            width: mask.width,
+            height: mask.height,
+            bytes: distances.enumerated().map { index, distance in
+                guard mask.bytes[index] >= 128 else { return 0 }
+                return UInt8(min(distance * 255 / radius, 255))
+            }
+        )
+    }
+
+    private static func blend(
+        output: RGBA,
+        original: RGBA,
+        generated: RGBA,
+        mask: GrayBuffer
+    ) {
+        for index in 0..<(output.width * output.height) {
+            let alpha = Int(mask.bytes[index])
+            for channel in 0..<3 {
+                let generatedValue = Int(generated.bytes[index * 4 + channel])
+                let originalValue = Int(original.bytes[index * 4 + channel])
+                output.bytes[index * 4 + channel] = UInt8(
+                    (generatedValue * alpha
+                        + originalValue * (255 - alpha)
+                        + 127) / 255
+                )
+            }
+        }
+    }
+
+    private static func resized(
+        _ image: CGImage,
+        width: Int,
+        height: Int,
+        grayscale: Bool = false
+    ) -> CGImage? {
+        let colorSpace = grayscale
+            ? CGColorSpaceCreateDeviceGray()
+            : (CGColorSpace(name: CGColorSpace.sRGB)
+                ?? CGColorSpaceCreateDeviceRGB())
+        let bytesPerRow = grayscale ? width : width * 4
+        let bitmapInfo = grayscale
+            ? CGImageAlphaInfo.none.rawValue
+            : CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return nil
+        }
+        context.interpolationQuality = grayscale ? .none : .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
 }
 
 final class CoreMLInpaintingService: @unchecked Sendable {
@@ -151,13 +457,15 @@ final class CoreMLInpaintingService: @unchecked Sendable {
             try await withCheckedThrowingContinuation { continuation in
                 queue.async {
                     do {
-                        let images = try self.run(
-                            resourcesURL: resourcesURL,
-                            request: request,
-                            settings: settings,
-                            cancellation: cancellation,
-                            progress: progress
-                        )
+                        let images = try autoreleasepool {
+                            try self.run(
+                                resourcesURL: resourcesURL,
+                                request: request,
+                                settings: settings,
+                                cancellation: cancellation,
+                                progress: progress
+                            )
+                        }
                         continuation.resume(returning: images)
                     } catch {
                         continuation.resume(throwing: error)
@@ -176,9 +484,13 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         cancellation: GenerationCancellationToken,
         progress: @escaping @Sendable (GenerationUpdate) -> Void
     ) throws -> GenerationResult {
-        guard let maskedImage = InpaintingImageComposer.maskedImage(
-            from: request.image,
+        guard let prepared = InpaintingImageComposer.prepareFocusedInput(
+            image: request.image,
             mask: request.mask
+        ),
+        let maskedImage = InpaintingImageComposer.maskedImage(
+            from: prepared.image,
+            mask: prepared.mask
         ) else {
             throw CloverPipelineError.incompatibleResources
         }
@@ -196,14 +508,16 @@ final class CoreMLInpaintingService: @unchecked Sendable {
             prompt: settings.trimmedPrompt
         )
         generation.negativePrompt = settings.negativePrompt
-        generation.startingImage = request.image
+        generation.startingImage = prepared.image
         generation.maskedImage = maskedImage
-        generation.inpaintingMask = request.mask
+        generation.inpaintingMask = prepared.mask
         generation.imageCount = max(settings.imageCount, 1)
         generation.stepCount = requestedStepCount
         generation.seed = settings.seed
         generation.guidanceScale = Float(settings.guidanceScale)
-        generation.schedulerType = inpaintingScheduler(for: settings.scheduler)
+        // DPM-Solver is stable for this 9-channel model. PNDM can collapse
+        // otherwise valid edits to an all-black masked region at 30+ steps.
+        generation.schedulerType = .dpmSolverMultistepScheduler
         generation.rngType = inpaintingRandomGenerator(for: settings.randomGenerator)
         generation.useDenoisedIntermediates = true
         generation.disableSafety = CloverPipelineFactory.isSafetyCheckerDisabled
@@ -226,10 +540,11 @@ final class CoreMLInpaintingService: @unchecked Sendable {
                 LatentPreviewRenderer.render(update.currentLatentSamples.first)
             }
             let previewImage = renderedPreview.flatMap { image in
-                InpaintingImageComposer.composite(
+                InpaintingImageComposer.compositeFocused(
                     original: request.image,
                     generated: image,
-                    mask: request.mask
+                    mask: request.mask,
+                    cropRect: prepared.cropRect
                 )
             } ?? renderedPreview
             let preview = previewImage.map { image in
@@ -240,7 +555,9 @@ final class CoreMLInpaintingService: @unchecked Sendable {
                     imageIndex: 0
                 )
             }
+            let previewInterval = min(max(settings.previewInterval, 1), 10)
             if completedStep < requestedStepCount,
+               completedStep.isMultiple(of: previewInterval),
                let previewImage,
                let jpegData = autoreleasepool(invoking: {
                    UIImage(cgImage: previewImage).jpegData(
@@ -258,7 +575,10 @@ final class CoreMLInpaintingService: @unchecked Sendable {
             }
             progress(
                 GenerationUpdate(
-                    progress: min(max(imageProgress, 0), 1),
+                    // Denoising is not the end of the request. Reserve the
+                    // final 10% for VAE decode, safety checking, validation,
+                    // exact-mask compositing, and Library persistence.
+                    progress: min(max(imageProgress * 0.9, 0), 0.9),
                     preview: preview
                 )
             )
@@ -269,31 +589,26 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         }
         let images: [CGImage] = generated.compactMap { optionalImage -> CGImage? in
             guard let image = optionalImage else { return nil }
-            return InpaintingImageComposer.composite(
+            guard InpaintingImageComposer.hasUsableMaskedContent(
+                generated: image,
+                mask: prepared.mask
+            ) else { return nil }
+            return InpaintingImageComposer.compositeFocused(
                 original: request.image,
                 generated: image,
-                mask: request.mask
+                mask: request.mask,
+                cropRect: prepared.cropRect
             ) ?? image
         }
         guard !images.isEmpty else {
-            throw GenerationError.noImages
+            throw GenerationError.unusableInpaintingOutput
         }
-        progress(GenerationUpdate(progress: 1, preview: nil))
         return GenerationResult(
             images: images.enumerated().map { index, image in
                 GeneratedImage(cgImage: image, imageIndex: index)
             },
             previewFrames: storedPreviews
         )
-    }
-
-    private func inpaintingScheduler(
-        for scheduler: GenerationSettings.Scheduler
-    ) -> StableDiffusionScheduler {
-        switch scheduler {
-        case .pndm: .pndmScheduler
-        case .dpmSolver: .dpmSolverMultistepScheduler
-        }
     }
 
     private func inpaintingRandomGenerator(

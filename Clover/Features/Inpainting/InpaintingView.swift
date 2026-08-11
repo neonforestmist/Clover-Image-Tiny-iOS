@@ -9,7 +9,7 @@ struct InpaintingView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var sourceImage: CGImage?
     @State private var strokes: [MaskStroke] = []
-    @State private var settings = GenerationSettings()
+    @State private var settings = GenerationSettings.inpaintingDefaults
     @State private var presentedSheet: InpaintingSheet?
     @State private var isWorking = false
     @State private var progress = 0.0
@@ -17,6 +17,7 @@ struct InpaintingView: View {
     @State private var errorMessage: String?
     @State private var cancellation: GenerationCancellationToken?
     @State private var generationTask: Task<Void, Never>?
+    @State private var activeGenerationID: UUID?
 
     private let service = CoreMLInpaintingService()
 
@@ -77,6 +78,7 @@ struct InpaintingView: View {
             await loadSelectedPhoto()
         }
         .onDisappear {
+            activeGenerationID = nil
             cancellation?.cancel()
             generationTask?.cancel()
         }
@@ -111,6 +113,22 @@ struct InpaintingView: View {
             if isWorking, let preview {
                 InpaintingPreviewCanvas(preview: preview)
                     .frame(height: 300)
+
+                HStack(spacing: 7) {
+                    Image(systemName: "photo")
+                    Text("Live preview")
+                    Spacer()
+                    Text(
+                        preview.step >= preview.stepCount
+                            ? "Finishing image…"
+                            : "Step \(preview.step) of \(preview.stepCount)"
+                    )
+                        .monospacedDigit()
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("inpainting-preview-step")
             } else if let sourceImage {
                 MaskEditor(image: sourceImage, strokes: $strokes)
                     .frame(height: 300)
@@ -245,7 +263,7 @@ struct InpaintingView: View {
                 Spacer()
 
                 if case .notInstalled = modelManager.state {
-                    Button("Download") {
+                    Button(downloadButtonTitle) {
                         modelManager.download()
                     }
                     .buttonStyle(.borderedProminent)
@@ -269,7 +287,7 @@ struct InpaintingView: View {
                 ProgressView(value: progress)
                     .tint(.cloverGreen)
                 if let manifest = modelManager.manifest {
-                    Text("\(manifest.totalSize.formatted(.byteCount(style: .file))) total")
+                    Text("\(manifest.totalSizeInMegabytes) total")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -297,12 +315,6 @@ struct InpaintingView: View {
     private var actionBar: some View {
         VStack(spacing: 8) {
             if isWorking {
-                if let preview {
-                    Text("Step \(preview.step) of \(preview.stepCount)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("inpainting-preview-step")
-                }
                 ProgressView(value: progress)
                     .tint(.cloverGreen)
                     .accessibilityLabel("Inpainting progress")
@@ -360,7 +372,7 @@ struct InpaintingView: View {
         case .downloading:
             "Downloading Core ML bundle"
         case .notInstalled:
-            "Download the Core ML bundle"
+            "Optional inpainting download"
         case .failed:
             "Download needs attention"
         }
@@ -373,16 +385,25 @@ struct InpaintingView: View {
         case .checking:
             "Fetching the verified release manifest"
         case let .downloading(progress):
-            "\(Int(progress * 100))% · checksummed resources"
+            if let manifest = modelManager.manifest {
+                "\(Int(progress * 100))% of \(manifest.totalSizeInMegabytes) · checksummed"
+            } else {
+                "\(Int(progress * 100))% · checksummed resources"
+            }
         case .notInstalled:
             if let manifest = modelManager.manifest {
-                "\(manifest.totalSize.formatted(.byteCount(style: .file))) · verified from Hugging Face"
+                "\(manifest.totalSizeInMegabytes) · downloaded only when you enable Inpainting"
             } else {
-                "Verified resources from Hugging Face"
+                "Downloaded only when you enable Inpainting"
             }
         case let .failed(message):
             message
         }
+    }
+
+    private var downloadButtonTitle: String {
+        guard let manifest = modelManager.manifest else { return "Download" }
+        return "Download \(manifest.totalSizeInMegabytes)"
     }
 
     private func loadSelectedPhoto() async {
@@ -431,10 +452,13 @@ struct InpaintingView: View {
         requestSettings.stepCount = InpaintingGenerationLimits.clampedStepCount(
             settings.stepCount
         )
+        requestSettings.scheduler = .dpmSolver
         requestSettings.livePreviewEnabled = true
-        requestSettings.previewInterval = 1
+        requestSettings.previewInterval = 5
         let token = GenerationCancellationToken()
+        let generationID = UUID()
         cancellation = token
+        activeGenerationID = generationID
         isWorking = true
         progress = 0
         preview = nil
@@ -449,6 +473,7 @@ struct InpaintingView: View {
                     cancellation: token
                 ) { update in
                     Task { @MainActor in
+                        guard activeGenerationID == generationID else { return }
                         progress = update.progress
                         if let updatePreview = update.preview {
                             preview = updatePreview
@@ -456,7 +481,9 @@ struct InpaintingView: View {
                     }
                 }
 
-                guard !token.isCancelled, let image = result.images.first else {
+                guard activeGenerationID == generationID,
+                      !token.isCancelled,
+                      let image = result.images.first else {
                     throw GenerationError.cancelled
                 }
                 sourceImage = image.cgImage
@@ -470,12 +497,15 @@ struct InpaintingView: View {
             } catch GenerationError.cancelled {
                 // Cancellation is an expected interaction.
             } catch {
+                guard activeGenerationID == generationID else { return }
                 preview = nil
                 errorMessage = error.localizedDescription
             }
+            guard activeGenerationID == generationID else { return }
             isWorking = false
             cancellation = nil
             generationTask = nil
+            activeGenerationID = nil
         }
     }
 }
@@ -493,17 +523,6 @@ private struct InpaintingPreviewCanvas: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.black)
         .clipShape(.rect(cornerRadius: 16))
-        .overlay(alignment: .bottom) {
-            Label(
-                "Step \(preview.step) of \(preview.stepCount)",
-                systemImage: "sparkles"
-            )
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: .capsule)
-            .padding()
-        }
         .accessibilityLabel(
             "Inpainting preview, step \(preview.step) of \(preview.stepCount)"
         )

@@ -33,6 +33,11 @@ struct InpaintingModelManifest: Codable, Sendable {
         resources.reduce(0) { $0 + $1.size }
     }
 
+    var totalSizeInMegabytes: String {
+        let megabytes = Int((Double(totalSize) / 1_000_000).rounded())
+        return "\(megabytes.formatted()) MB"
+    }
+
     func downloadURL(for resource: Resource) -> URL {
         var components = URLComponents(
             string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML/resolve/main/\(resource.path)"

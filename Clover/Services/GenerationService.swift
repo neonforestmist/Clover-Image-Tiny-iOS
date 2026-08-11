@@ -36,6 +36,7 @@ struct GenerationUpdate: @unchecked Sendable {
 enum GenerationError: LocalizedError {
     case missingResources
     case noImages
+    case unusableInpaintingOutput
     case modelExecutionPlan
     case cancelled
 
@@ -45,6 +46,8 @@ enum GenerationError: LocalizedError {
             "The Core ML resources are missing from this build."
         case .noImages:
             "Clover couldn’t produce an image. Try generating again."
+        case .unusableInpaintingOutput:
+            "Clover produced an unusable edit, so your original image and mask were kept. Try a larger mask or a different seed."
         case .modelExecutionPlan:
             "Clover couldn’t start its Core ML model. Restart the app and try again. If it continues, remove and download Clover again."
         case .cancelled:

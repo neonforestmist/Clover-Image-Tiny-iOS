@@ -92,6 +92,15 @@ struct GenerationSettings: Codable, Equatable, Sendable {
 
     init() {}
 
+    static var inpaintingDefaults: Self {
+        var settings = Self()
+        settings.stepCount = 20
+        settings.scheduler = .dpmSolver
+        settings.livePreviewEnabled = true
+        settings.previewInterval = 5
+        return settings
+    }
+
     init(from decoder: Decoder) throws {
         let defaults = Self()
         let container = try decoder.container(keyedBy: CodingKeys.self)

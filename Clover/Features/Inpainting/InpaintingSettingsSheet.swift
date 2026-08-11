@@ -48,7 +48,7 @@ struct InpaintingSettingsSheet: View {
                 } header: {
                     Text("Generation")
                 } footer: {
-                    Text("Inpainting supports 4–50 steps on device. More steps can improve detail but take longer.")
+                    Text("Inpainting supports 4–50 steps on device. Twenty steps is the recommended balance of detail, speed, and memory use.")
                 }
 
                 Section("Seed") {
@@ -69,16 +69,7 @@ struct InpaintingSettingsSheet: View {
                 }
 
                 Section("Sampler") {
-                    Picker("Scheduler", selection: $settings.scheduler) {
-                        ForEach(GenerationSettings.Scheduler.allCases) { scheduler in
-                            VStack(alignment: .leading) {
-                                Text(scheduler.title)
-                                Text(scheduler.detail)
-                            }
-                            .tag(scheduler)
-                        }
-                    }
-                    .accessibilityIdentifier("inpainting-scheduler-picker")
+                    LabeledContent("Scheduler", value: "DPM-Solver++")
 
                     Picker("Random generator", selection: $settings.randomGenerator) {
                         ForEach(GenerationSettings.RandomGenerator.allCases) { generator in
@@ -121,6 +112,9 @@ struct InpaintingSettingsSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .onAppear {
+            settings.scheduler = .dpmSolver
+        }
     }
 
     private var stepCount: Binding<Int> {
