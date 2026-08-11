@@ -143,9 +143,9 @@ access is used to refresh the catalog and download model files from Hugging
 Face.
 
 Live Step Previews render a lightweight RGB approximation directly from the
-current denoising latent every 1–10 steps. This keeps the VAE decoder and safety
-checker out of the denoising loop, avoiding repeated Core ML memory spikes on
-iPhone; the finished image still uses the full VAE decoder. Preview frames are
+current denoising latent every 1–10 steps. This keeps the VAE decoder out of the
+denoising loop, avoiding repeated Core ML memory spikes on iPhone; the finished
+image still uses the full VAE decoder. Preview frames are
 stored as compressed JPEGs inside the finished artwork's folder. The Library
 still shows one tile per final image; opening that image—or using the controls
 below the newest Create output—reveals a slider for scrubbing through the saved
@@ -187,7 +187,14 @@ every denoising step. Apple's license is retained in the vendored package.
 The model-picker artwork comes from the MIT-licensed Phosphor collection via
 Iconify. See [THIRD_PARTY_ASSETS.md](THIRD_PARTY_ASSETS.md) for attribution.
 
-### Local safety-checker override
+### Safety-checker behavior
+
+The Inpainting pipeline does not construct or run a safety checker. This is a
+fixed runtime policy, not a UI setting, so a valid edit cannot be discarded
+after live previews finish. Regular Create retains its packaged safety checker
+unless the local development override below is used.
+
+#### Local Regular Create override
 
 Safety checking is enabled by default. To disable it only for a local Xcode
 run, duplicate the `Clover` scheme, make the duplicate unshared, then add this
@@ -198,14 +205,14 @@ Run argument:
 ```
 
 The unshared scheme is stored under `xcuserdata` and is not staged to GitHub.
-The override is captured when Clover launches; both model construction and
-final decode use the same value, so a result cannot be filtered after a run
-that explicitly started with the override enabled. Without this argument,
-safety checking remains enabled.
+The override is captured when Clover launches; Regular Create model
+construction and final decode use the same value. Without this argument,
+Regular Create safety checking remains enabled. It has no effect on
+Inpainting, whose safety checker is always absent.
 
 If an inpainting seed produces a collapsed black/invalid edit, Clover retries
-once with the next deterministic seed. The seed that actually succeeds is
-shown in the editor and saved with the finished Library artwork.
+up to two more times with deterministic follow-up seeds. The seed that actually
+succeeds is shown in the editor and saved with the finished Library artwork.
 
 ## Regenerate the Xcode project
 

@@ -49,6 +49,14 @@ enum SafetyCheckerPolicy {
     }
 }
 
+enum InpaintingRuntimePolicy {
+    /// Inpainting edits user-selected pixels in a source image. Keeping this
+    /// false by construction avoids a late safety-filter nil after previews
+    /// have already completed, regardless of the regular Create policy.
+    static let isSafetyCheckerEnabled = false
+    static let generationAttemptCount = 3
+}
+
 enum CloverPipelineFactory {
     /// Captured once so model construction and decode always agree, even if
     /// defaults are mutated while a long generation is running.
@@ -145,17 +153,12 @@ enum CloverPipelineFactory {
             modelAt: urls.encoderURL,
             configuration: configuration
         )
-        let safetyChecker = makeSafetyChecker(
-            at: urls.safetyCheckerURL,
-            configuration: configuration
-        )
-
         return StableDiffusionPipeline(
             textEncoder: textEncoder,
             unet: unet,
             decoder: decoder,
             encoder: encoder,
-            safetyChecker: safetyChecker,
+            safetyChecker: nil,
             reduceMemory: true
         )
     }

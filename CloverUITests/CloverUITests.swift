@@ -244,7 +244,9 @@ final class CloverUITests: XCTestCase {
         }
 
         let app = XCUIApplication()
-        app.launchArguments = ["-DisableSafetyChecker", "YES"]
+        // Explicitly keep the regular Create override off. Inpainting must
+        // still finish because its pipeline is safety-free by construction.
+        app.launchArguments = ["-DisableSafetyChecker", "NO"]
         app.launch()
 
         app.tabBars.buttons["Inpainting"].tap()

@@ -3,6 +3,14 @@ import XCTest
 @testable import Clover
 
 final class InpaintingTests: XCTestCase {
+    func testInpaintingSafetyCheckerIsDisabledByConstruction() {
+        XCTAssertFalse(InpaintingRuntimePolicy.isSafetyCheckerEnabled)
+    }
+
+    func testInpaintingRetriesThreeDeterministicSeeds() {
+        XCTAssertEqual(InpaintingRuntimePolicy.generationAttemptCount, 3)
+    }
+
     func testStepCountIsClampedToSafeOnDeviceRange() {
         XCTAssertEqual(
             InpaintingGenerationLimits.clampedStepCount(3),

@@ -536,7 +536,10 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         generation.schedulerType = .dpmSolverMultistepScheduler
         generation.rngType = inpaintingRandomGenerator(for: settings.randomGenerator)
         generation.useDenoisedIntermediates = settings.livePreviewEnabled
-        generation.disableSafety = CloverPipelineFactory.isSafetyCheckerDisabled
+        // Inpainting never constructs a safety checker. Keep the pipeline
+        // configuration in agreement so decode cannot discard a valid final
+        // image after live previews have already been shown.
+        generation.disableSafety = !InpaintingRuntimePolicy.isSafetyCheckerEnabled
 
         defer { pipeline.unloadResources() }
         var storedPreviews: [GeneratedPreviewFrame] = []
@@ -546,9 +549,9 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         var reportedProgress = 0.0
 
         // A small subset of seeds can collapse this compact 9-channel U-Net
-        // to an invalid masked region. Retry once automatically with the next
-        // deterministic seed instead of making the user redraw their mask.
-        for attempt in 0..<2 {
+        // to an invalid masked region. Try up to three deterministic seeds
+        // instead of making the user redraw their mask.
+        for attempt in 0..<InpaintingRuntimePolicy.generationAttemptCount {
             generation.seed = settings.seed &+ UInt32(attempt)
             var attemptPreviews: [GeneratedPreviewFrame] = []
             let generated = try pipeline.generateImages(
