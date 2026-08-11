@@ -130,6 +130,46 @@ final class InpaintingTests: XCTestCase {
         XCTAssertEqual(settings.previewInterval, 5)
     }
 
+    func testDisabledLivePreviewNeverRendersFrames() {
+        for step in 1...20 {
+            XCTAssertFalse(
+                InpaintingPreviewPolicy.shouldRender(
+                    enabled: false,
+                    completedStep: step,
+                    stepCount: 20,
+                    interval: 5
+                )
+            )
+        }
+    }
+
+    func testLivePreviewRendersAtIntervalAndFinalStep() {
+        XCTAssertFalse(
+            InpaintingPreviewPolicy.shouldRender(
+                enabled: true,
+                completedStep: 4,
+                stepCount: 20,
+                interval: 5
+            )
+        )
+        XCTAssertTrue(
+            InpaintingPreviewPolicy.shouldRender(
+                enabled: true,
+                completedStep: 5,
+                stepCount: 20,
+                interval: 5
+            )
+        )
+        XCTAssertTrue(
+            InpaintingPreviewPolicy.shouldRender(
+                enabled: true,
+                completedStep: 20,
+                stepCount: 20,
+                interval: 7
+            )
+        )
+    }
+
     func testSolidBlackMaskedOutputIsRejected() throws {
         let black = try XCTUnwrap(makeRGBAImage { _ in (0, 0, 0, 255) })
         let mask = try XCTUnwrap(makeMaskImage())

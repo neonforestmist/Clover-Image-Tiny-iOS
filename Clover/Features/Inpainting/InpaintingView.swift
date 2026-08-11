@@ -144,7 +144,11 @@ struct InpaintingView: View {
                 maskControls
 
                 if isWorking {
-                    ProgressView("Preparing preview…")
+                    ProgressView(
+                        settings.livePreviewEnabled
+                            ? "Preparing preview…"
+                            : "Generating without live previews…"
+                    )
                         .frame(maxWidth: .infinity)
                 }
 
@@ -550,8 +554,10 @@ struct InpaintingView: View {
             settings.stepCount
         )
         requestSettings.scheduler = .dpmSolver
-        requestSettings.livePreviewEnabled = true
-        requestSettings.previewInterval = 5
+        requestSettings.previewInterval = min(
+            max(settings.previewInterval, 1),
+            min(requestSettings.stepCount, 10)
+        )
         let token = GenerationCancellationToken()
         let generationID = UUID()
         cancellation = token
@@ -587,10 +593,15 @@ struct InpaintingView: View {
                 strokes.removeAll()
                 redoStrokes.removeAll()
                 preview = nil
+                var persistedSettings = requestSettings
+                if let resolvedSeed = result.resolvedSeed {
+                    persistedSettings.seed = resolvedSeed
+                    settings.seed = resolvedSeed
+                }
                 _ = try library.add(
                     images: result.images,
                     previewFrames: result.previewFrames,
-                    settings: requestSettings
+                    settings: persistedSettings
                 )
             } catch GenerationError.cancelled {
                 // Cancellation is an expected interaction.

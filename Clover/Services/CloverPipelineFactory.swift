@@ -16,10 +16,43 @@ enum CloverPipelineError: LocalizedError {
     }
 }
 
-enum CloverPipelineFactory {
-    static var isSafetyCheckerDisabled: Bool {
-        UserDefaults.standard.bool(forKey: "DisableSafetyChecker")
+enum SafetyCheckerPolicy {
+    static let overrideKey = "DisableSafetyChecker"
+
+    static var current: Bool {
+        resolve(
+            arguments: ProcessInfo.processInfo.arguments,
+            storedValue: UserDefaults.standard.bool(forKey: overrideKey)
+        )
     }
+
+    static func resolve(
+        arguments: [String],
+        storedValue: Bool
+    ) -> Bool {
+        let flag = "-\(overrideKey)"
+        guard let index = arguments.lastIndex(of: flag) else {
+            return storedValue
+        }
+        let valueIndex = arguments.index(after: index)
+        guard arguments.indices.contains(valueIndex) else {
+            return true
+        }
+        switch arguments[valueIndex].lowercased() {
+        case "1", "true", "yes":
+            return true
+        case "0", "false", "no":
+            return false
+        default:
+            return storedValue
+        }
+    }
+}
+
+enum CloverPipelineFactory {
+    /// Captured once so model construction and decode always agree, even if
+    /// defaults are mutated while a long generation is running.
+    static let isSafetyCheckerDisabled = SafetyCheckerPolicy.current
 
     static func make(
         resourcesURL: URL,

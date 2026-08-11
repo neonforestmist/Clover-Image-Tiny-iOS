@@ -80,6 +80,37 @@ struct InpaintingSettingsSheet: View {
                 }
 
                 Section {
+                    Toggle(isOn: $settings.livePreviewEnabled) {
+                        Label(
+                            "Live Step Previews",
+                            systemImage: "photo.on.rectangle.angled"
+                        )
+                    }
+                    .accessibilityIdentifier("inpainting-live-preview-toggle")
+
+                    Stepper(
+                        previewIntervalTitle,
+                        value: previewIntervalBinding,
+                        in: 1...previewIntervalLimit
+                    )
+                    .disabled(!settings.livePreviewEnabled)
+                    .accessibilityIdentifier("inpainting-preview-interval-stepper")
+
+                    HapticlessIntegerSlider(
+                        value: previewIntervalBinding,
+                        in: 1...previewIntervalLimit,
+                        accessibilityLabel: "Inpainting preview interval",
+                        accessibilityValue: previewIntervalTitle,
+                        accessibilityIdentifier: "inpainting-preview-interval-slider"
+                    )
+                    .disabled(!settings.livePreviewEnabled)
+                } header: {
+                    Text("Progress Preview")
+                } footer: {
+                    Text("Preview frames are saved with the finished edit and can be scrubbed or exported later. Turning previews off reduces decoding work, storage use, and battery use.")
+                }
+
+                Section {
                     Picker("Compute", selection: $settings.computeTarget) {
                         ForEach(GenerationSettings.ComputeTarget.allCases) { target in
                             Label(target.title, systemImage: target.systemImage)
@@ -124,6 +155,29 @@ struct InpaintingSettingsSheet: View {
             },
             set: {
                 settings.stepCount = InpaintingGenerationLimits.clampedStepCount($0)
+            }
+        )
+    }
+
+    private var previewIntervalLimit: Int {
+        min(max(stepCount.wrappedValue, 1), 10)
+    }
+
+    private var previewIntervalTitle: String {
+        let interval = min(settings.previewInterval, previewIntervalLimit)
+        return "Every \(interval) \(interval == 1 ? "step" : "steps")"
+    }
+
+    private var previewIntervalBinding: Binding<Int> {
+        Binding(
+            get: {
+                min(max(settings.previewInterval, 1), previewIntervalLimit)
+            },
+            set: {
+                settings.previewInterval = min(
+                    max($0, 1),
+                    previewIntervalLimit
+                )
             }
         )
     }

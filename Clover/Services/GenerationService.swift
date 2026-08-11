@@ -19,6 +19,17 @@ struct GeneratedPreviewFrame: Sendable {
 struct GenerationResult: Sendable {
     let images: [GeneratedImage]
     let previewFrames: [GeneratedPreviewFrame]
+    let resolvedSeed: UInt32?
+
+    init(
+        images: [GeneratedImage],
+        previewFrames: [GeneratedPreviewFrame],
+        resolvedSeed: UInt32? = nil
+    ) {
+        self.images = images
+        self.previewFrames = previewFrames
+        self.resolvedSeed = resolvedSeed
+    }
 }
 
 struct GenerationPreview: @unchecked Sendable {
@@ -47,7 +58,7 @@ enum GenerationError: LocalizedError {
         case .noImages:
             "Clover couldn’t produce an image. Try generating again."
         case .unusableInpaintingOutput:
-            "Clover produced an unusable edit, so your original image and mask were kept. Try a larger mask or a different seed."
+            "Clover retried the edit but couldn’t produce a usable result, so your original image and mask were kept. Try a larger mask or a different prompt."
         case .modelExecutionPlan:
             "Clover couldn’t start its Core ML model. Restart the app and try again. If it continues, remove and download Clover again."
         case .cancelled:

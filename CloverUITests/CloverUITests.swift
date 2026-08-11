@@ -31,6 +31,18 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(app.steppers["inpainting-steps-stepper"].exists)
         XCTAssertTrue(app.otherElements["inpainting-steps-slider"].exists)
         XCTAssertTrue(app.sliders["inpainting-guidance-slider"].exists)
+        let livePreview = app.switches["inpainting-live-preview-toggle"]
+        for _ in 0..<3 where !livePreview.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(livePreview.waitForExistence(timeout: 3))
+        let previewInterval = app.otherElements[
+            "inpainting-preview-interval-slider"
+        ]
+        for _ in 0..<3 where !previewInterval.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(previewInterval.waitForExistence(timeout: 3))
         app.buttons["Done"].tap()
     }
 
@@ -232,6 +244,7 @@ final class CloverUITests: XCTestCase {
         }
 
         let app = XCUIApplication()
+        app.launchArguments = ["-DisableSafetyChecker", "YES"]
         app.launch()
 
         app.tabBars.buttons["Inpainting"].tap()

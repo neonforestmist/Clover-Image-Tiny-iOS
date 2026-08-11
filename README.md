@@ -96,6 +96,9 @@ offers the v2 download instead of silently continuing to use stale weights.
 Generation defaults to DPM-Solver++, 20 steps, CFG 6.0, live previews every
 five steps, and a focused crop with a 96-pixel context margin. Final output is
 composited through the exact mask so unpainted pixels stay unchanged.
+Live Step Previews and their interval can be changed in Inpainting Settings;
+turning them off skips latent preview rendering and does not store timeline
+frames, reducing generation overhead and storage use.
 
 The native editor includes Paint and Erase tools, adjustable brush size,
 Undo/Redo, and Clear Mask. Imported images open in a square crop editor with
@@ -195,6 +198,14 @@ Run argument:
 ```
 
 The unshared scheme is stored under `xcuserdata` and is not staged to GitHub.
+The override is captured when Clover launches; both model construction and
+final decode use the same value, so a result cannot be filtered after a run
+that explicitly started with the override enabled. Without this argument,
+safety checking remains enabled.
+
+If an inpainting seed produces a collapsed black/invalid edit, Clover retries
+once with the next deterministic seed. The seed that actually succeeds is
+shown in the editor and saved with the finished Library artwork.
 
 ## Regenerate the Xcode project
 

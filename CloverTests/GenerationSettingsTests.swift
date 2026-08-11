@@ -473,6 +473,45 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertFalse(message.localizedCaseInsensitiveContains("safety"))
     }
 
+    func testSafetyCheckerSchemeArgumentEnablesOverride() {
+        XCTAssertTrue(
+            SafetyCheckerPolicy.resolve(
+                arguments: ["Clover", "-DisableSafetyChecker", "YES"],
+                storedValue: false
+            )
+        )
+        XCTAssertTrue(
+            SafetyCheckerPolicy.resolve(
+                arguments: ["Clover", "-DisableSafetyChecker"],
+                storedValue: false
+            )
+        )
+    }
+
+    func testSafetyCheckerSchemeArgumentCanExplicitlyDisableOverride() {
+        XCTAssertFalse(
+            SafetyCheckerPolicy.resolve(
+                arguments: ["Clover", "-DisableSafetyChecker", "NO"],
+                storedValue: true
+            )
+        )
+    }
+
+    func testSafetyCheckerUsesStoredDefaultWithoutSchemeArgument() {
+        XCTAssertFalse(
+            SafetyCheckerPolicy.resolve(
+                arguments: ["Clover"],
+                storedValue: false
+            )
+        )
+        XCTAssertTrue(
+            SafetyCheckerPolicy.resolve(
+                arguments: ["Clover"],
+                storedValue: true
+            )
+        )
+    }
+
     func testPreviouslySavedAspectRatioFieldsAreIgnored() throws {
         let data = Data(
             """

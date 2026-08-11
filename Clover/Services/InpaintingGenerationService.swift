@@ -13,6 +13,20 @@ enum InpaintingGenerationLimits {
     }
 }
 
+enum InpaintingPreviewPolicy {
+    static func shouldRender(
+        enabled: Bool,
+        completedStep: Int,
+        stepCount: Int,
+        interval: Int
+    ) -> Bool {
+        guard enabled else { return false }
+        let clampedInterval = min(max(interval, 1), 10)
+        return completedStep.isMultiple(of: clampedInterval)
+            || completedStep >= stepCount
+    }
+}
+
 struct InpaintingRequest: @unchecked Sendable {
     let image: CGImage
     let mask: CGImage
@@ -468,7 +482,9 @@ final class CoreMLInpaintingService: @unchecked Sendable {
                         }
                         continuation.resume(returning: images)
                     } catch {
-                        continuation.resume(throwing: error)
+                        continuation.resume(
+                            throwing: GenerationError.presenting(error)
+                        )
                     }
                 }
             }
@@ -519,95 +535,134 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         // otherwise valid edits to an all-black masked region at 30+ steps.
         generation.schedulerType = .dpmSolverMultistepScheduler
         generation.rngType = inpaintingRandomGenerator(for: settings.randomGenerator)
-        generation.useDenoisedIntermediates = true
+        generation.useDenoisedIntermediates = settings.livePreviewEnabled
         generation.disableSafety = CloverPipelineFactory.isSafetyCheckerDisabled
 
         defer { pipeline.unloadResources() }
         var storedPreviews: [GeneratedPreviewFrame] = []
-        let generated = try pipeline.generateImages(configuration: generation) { update in
-            let schedulerStepCount = max(update.stepCount, 1)
-            let schedulerStep = min(
-                max(update.step + 1, 1),
-                schedulerStepCount
-            )
-            let completedStep = GenerationStepMapper.visibleStep(
-                updateStep: update.step,
-                requestedStepCount: requestedStepCount
-            )
-            let imageProgress = Double(schedulerStep)
-                / Double(schedulerStepCount)
-            let renderedPreview = autoreleasepool {
-                LatentPreviewRenderer.render(update.currentLatentSamples.first)
-            }
-            let previewImage = renderedPreview.flatMap { image in
-                InpaintingImageComposer.compositeFocused(
-                    original: request.image,
-                    generated: image,
-                    mask: request.mask,
-                    cropRect: prepared.cropRect
+        var images: [CGImage] = []
+        var resolvedSeed = settings.seed
+        var safetyFilteredOutput = false
+        var reportedProgress = 0.0
+
+        // A small subset of seeds can collapse this compact 9-channel U-Net
+        // to an invalid masked region. Retry once automatically with the next
+        // deterministic seed instead of making the user redraw their mask.
+        for attempt in 0..<2 {
+            generation.seed = settings.seed &+ UInt32(attempt)
+            var attemptPreviews: [GeneratedPreviewFrame] = []
+            let generated = try pipeline.generateImages(
+                configuration: generation
+            ) { update in
+                let schedulerStepCount = max(update.stepCount, 1)
+                let schedulerStep = min(
+                    max(update.step + 1, 1),
+                    schedulerStepCount
                 )
-            } ?? renderedPreview
-            let preview = previewImage.map { image in
-                GenerationPreview(
-                    cgImage: image,
-                    step: completedStep,
+                let completedStep = GenerationStepMapper.visibleStep(
+                    updateStep: update.step,
+                    requestedStepCount: requestedStepCount
+                )
+                let imageProgress = Double(schedulerStep)
+                    / Double(schedulerStepCount)
+                let previewInterval = min(max(settings.previewInterval, 1), 10)
+                let shouldPreview = InpaintingPreviewPolicy.shouldRender(
+                    enabled: settings.livePreviewEnabled,
+                    completedStep: completedStep,
                     stepCount: requestedStepCount,
-                    imageIndex: 0
+                    interval: previewInterval
                 )
-            }
-            let previewInterval = min(max(settings.previewInterval, 1), 10)
-            if completedStep < requestedStepCount,
-               completedStep.isMultiple(of: previewInterval),
-               let previewImage,
-               let jpegData = autoreleasepool(invoking: {
-                   UIImage(cgImage: previewImage).jpegData(
-                       compressionQuality: 0.82
-                   )
-               }) {
-                storedPreviews.append(
-                    GeneratedPreviewFrame(
-                        jpegData: jpegData,
+                let renderedPreview = shouldPreview
+                    ? autoreleasepool {
+                        LatentPreviewRenderer.render(
+                            update.currentLatentSamples.first
+                        )
+                    }
+                    : nil
+                let previewImage = renderedPreview.flatMap { image in
+                    InpaintingImageComposer.compositeFocused(
+                        original: request.image,
+                        generated: image,
+                        mask: request.mask,
+                        cropRect: prepared.cropRect
+                    )
+                } ?? renderedPreview
+                let preview = previewImage.map { image in
+                    GenerationPreview(
+                        cgImage: image,
                         step: completedStep,
                         stepCount: requestedStepCount,
                         imageIndex: 0
                     )
+                }
+                if completedStep < requestedStepCount,
+                   completedStep.isMultiple(of: previewInterval),
+                   let previewImage,
+                   let jpegData = autoreleasepool(invoking: {
+                       UIImage(cgImage: previewImage).jpegData(
+                           compressionQuality: 0.82
+                       )
+                   }) {
+                    attemptPreviews.append(
+                        GeneratedPreviewFrame(
+                            jpegData: jpegData,
+                            step: completedStep,
+                            stepCount: requestedStepCount,
+                            imageIndex: 0
+                        )
+                    )
+                }
+                // Never move backward if an automatic retry starts. Denoising
+                // stops at 90%; decode, validation, compositing, and Library
+                // persistence own the final portion of the progress bar.
+                reportedProgress = max(
+                    reportedProgress,
+                    min(max(imageProgress * 0.9, 0), 0.9)
                 )
+                progress(
+                    GenerationUpdate(
+                        progress: reportedProgress,
+                        preview: preview
+                    )
+                )
+                return !cancellation.isCancelled
             }
-            progress(
-                GenerationUpdate(
-                    // Denoising is not the end of the request. Reserve the
-                    // final 10% for VAE decode, safety checking, validation,
-                    // exact-mask compositing, and Library persistence.
-                    progress: min(max(imageProgress * 0.9, 0), 0.9),
-                    preview: preview
-                )
-            )
-            return !cancellation.isCancelled
-        }
-        guard !cancellation.isCancelled else {
-            throw GenerationError.cancelled
-        }
-        let images: [CGImage] = generated.compactMap { optionalImage -> CGImage? in
-            guard let image = optionalImage else { return nil }
-            guard InpaintingImageComposer.hasUsableMaskedContent(
-                generated: image,
-                mask: prepared.mask
-            ) else { return nil }
-            return InpaintingImageComposer.compositeFocused(
-                original: request.image,
-                generated: image,
-                mask: request.mask,
-                cropRect: prepared.cropRect
-            ) ?? image
+            guard !cancellation.isCancelled else {
+                throw GenerationError.cancelled
+            }
+            safetyFilteredOutput = safetyFilteredOutput
+                || generated.contains { $0 == nil }
+            images = generated.compactMap { optionalImage -> CGImage? in
+                guard let image = optionalImage else { return nil }
+                guard InpaintingImageComposer.hasUsableMaskedContent(
+                    generated: image,
+                    mask: prepared.mask
+                ) else { return nil }
+                return InpaintingImageComposer.compositeFocused(
+                    original: request.image,
+                    generated: image,
+                    mask: request.mask,
+                    cropRect: prepared.cropRect
+                ) ?? image
+            }
+            if !images.isEmpty {
+                storedPreviews = attemptPreviews
+                resolvedSeed = generation.seed
+                break
+            }
         }
         guard !images.isEmpty else {
+            if safetyFilteredOutput, !generation.disableSafety {
+                throw GenerationError.noImages
+            }
             throw GenerationError.unusableInpaintingOutput
         }
         return GenerationResult(
             images: images.enumerated().map { index, image in
                 GeneratedImage(cgImage: image, imageIndex: index)
             },
-            previewFrames: storedPreviews
+            previewFrames: storedPreviews,
+            resolvedSeed: resolvedSeed
         )
     }
 
