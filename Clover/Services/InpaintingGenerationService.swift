@@ -513,8 +513,18 @@ final class CoreMLInpaintingService: @unchecked Sendable {
 
         let configuration = MLModelConfiguration()
         configuration.computeUnits = inpaintingComputeUnits(for: settings.computeTarget)
+        let styleWeights = try settings.styleIDs.map { id in
+            guard let url = ModelStorage.styleWeightsURL(for: id) else {
+                throw GenerationError.missingResources
+            }
+            return LoRAAdapter.WeightedWeights(
+                url: url,
+                scale: Float(settings.styleStrength(for: id))
+            )
+        }
         let pipeline = try CloverPipelineFactory.makeInpainting(
             resourcesURL: resourcesURL,
+            styleWeights: styleWeights,
             configuration: configuration
         )
         let requestedStepCount = InpaintingGenerationLimits.clampedStepCount(

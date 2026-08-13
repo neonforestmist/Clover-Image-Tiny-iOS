@@ -31,7 +31,8 @@ struct AppShell: View {
             NavigationStack {
                 InpaintingView(
                     library: library,
-                    modelManager: inpaintingModelManager
+                    modelManager: inpaintingModelManager,
+                    styleManager: modelManager
                 )
             }
             .tabItem {

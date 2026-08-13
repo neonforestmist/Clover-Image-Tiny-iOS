@@ -176,7 +176,7 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
 
     private var pipeline: StableDiffusionPipeline?
     private var loadedComputeTarget: GenerationSettings.ComputeTarget?
-    private var loadedModelID: String?
+    private var loadedStyleSignature: [String] = []
 
     func generate(
         settings: GenerationSettings,
@@ -211,28 +211,36 @@ final class CoreMLGenerationService: ImageGenerating, @unchecked Sendable {
         cancellation: GenerationCancellationToken,
         progress: @escaping @Sendable (GenerationUpdate) -> Void
     ) throws -> GenerationResult {
-        guard let resourcesURL = ModelStorage.resourcesURL(
-            for: settings.modelID
-        ) else {
+        guard let resourcesURL = ModelStorage.resourcesURL(for: ModelManager.baseID) else {
             throw GenerationError.missingResources
+        }
+        let styleWeights = try settings.styleIDs.map { id in
+            guard let url = ModelStorage.styleWeightsURL(for: id) else {
+                throw GenerationError.missingResources
+            }
+            return LoRAAdapter.WeightedWeights(
+                url: url,
+                scale: Float(settings.styleStrength(for: id))
+            )
+        }
+        let styleSignature = settings.styleIDs.map {
+            "\($0):\(settings.styleStrength(for: $0))"
         }
 
         if pipeline == nil
             || loadedComputeTarget != settings.computeTarget
-            || loadedModelID != settings.modelID {
+            || loadedStyleSignature != styleSignature {
             let configuration = MLModelConfiguration()
             configuration.computeUnits = settings.computeTarget.coreMLComputeUnits
 
             let newPipeline = try CloverPipelineFactory.make(
                 resourcesURL: resourcesURL,
-                styleWeightsURL: ModelStorage.importedWeightsURL(
-                    for: settings.modelID
-                ),
+                styleWeights: styleWeights,
                 configuration: configuration
             )
             pipeline = newPipeline
             loadedComputeTarget = settings.computeTarget
-            loadedModelID = settings.modelID
+            loadedStyleSignature = styleSignature
         }
 
         guard let pipeline else {

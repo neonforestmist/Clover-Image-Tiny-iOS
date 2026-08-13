@@ -32,7 +32,7 @@ enum InpaintingRuntimePolicy {
 enum CloverPipelineFactory {
     static func make(
         resourcesURL: URL,
-        styleWeightsURL: URL? = nil,
+        styleWeights: [LoRAAdapter.WeightedWeights] = [],
         configuration: MLModelConfiguration
     ) throws -> StableDiffusionPipeline {
         let urls = StableDiffusionPipeline.ResourceURLs(
@@ -45,21 +45,26 @@ enum CloverPipelineFactory {
               FileManager.default.fileExists(
                 atPath: adapterSchemaURL.path
               ) else {
-            if styleWeightsURL != nil {
+            if !styleWeights.isEmpty {
                 throw CloverPipelineError.importedStyleRequiresStatefulClover
             }
             throw CloverPipelineError.incompatibleResources
         }
 
-        let adapterURL = styleWeightsURL ?? resourcesURL.appending(
+        var resolvedWeights = styleWeights
+        let bundledAdapterURL = resourcesURL.appending(
             path: "Adapter.safetensors"
         )
-        let adapter = FileManager.default.fileExists(
-            atPath: adapterURL.path
-        ) ? try LoRAAdapter(
-            weightsAt: adapterURL,
-            schemaAt: adapterSchemaURL
-        ) : nil
+        if resolvedWeights.isEmpty,
+           FileManager.default.fileExists(atPath: bundledAdapterURL.path) {
+            resolvedWeights = [.init(url: bundledAdapterURL)]
+        }
+        let adapter = resolvedWeights.isEmpty
+            ? nil
+            : try LoRAAdapter(
+                weightedWeights: resolvedWeights,
+                schemaAt: adapterSchemaURL
+            )
 
         return try makeStatefulLoRAPipeline(
             urls: urls,
@@ -68,11 +73,12 @@ enum CloverPipelineFactory {
         )
     }
 
-    /// Builds the standalone 9-channel inpainting pipeline. Inpainting
-    /// resources intentionally do not use Clover's stateful style adapter
-    /// contract; they contain their own U-Net and VAE encoder.
+    /// Builds the standalone 9-channel inpainting pipeline. Current resources
+    /// expose the same stateful style slots as Create; older chunked downloads
+    /// remain usable without styles during migration.
     static func makeInpainting(
         resourcesURL: URL,
+        styleWeights: [LoRAAdapter.WeightedWeights] = [],
         configuration: MLModelConfiguration
     ) throws -> StableDiffusionPipeline {
         let urls = StableDiffusionPipeline.ResourceURLs(
@@ -86,8 +92,17 @@ enum CloverPipelineFactory {
         ) && FileManager.default.fileExists(
             atPath: urls.unetChunk2URL.path
         )
+        let adapterSchemaURL = resourcesURL.appending(
+            path: "adapter-schema.json"
+        )
+        let hasAdapterSchema = FileManager.default.fileExists(
+            atPath: adapterSchemaURL.path
+        )
         guard (hasFullUnet || hasChunkedUnet),
               FileManager.default.fileExists(atPath: urls.encoderURL.path) else {
+            throw CloverPipelineError.incompatibleResources
+        }
+        if !styleWeights.isEmpty, (!hasFullUnet || !hasAdapterSchema) {
             throw CloverPipelineError.incompatibleResources
         }
 
@@ -101,7 +116,19 @@ enum CloverPipelineFactory {
             configuration: configuration
         )
         let unet: Unet
-        if FileManager.default.fileExists(atPath: urls.unetChunk1URL.path),
+        if hasFullUnet, hasAdapterSchema {
+            let adapter = styleWeights.isEmpty
+                ? nil
+                : try LoRAAdapter(
+                    weightedWeights: styleWeights,
+                    schemaAt: adapterSchemaURL
+                )
+            unet = makeStatefulUnet(
+                modelURL: urls.unetURL,
+                adapter: adapter,
+                configuration: configuration
+            )
+        } else if FileManager.default.fileExists(atPath: urls.unetChunk1URL.path),
            FileManager.default.fileExists(atPath: urls.unetChunk2URL.path) {
             unet = Unet(
                 chunksAt: [urls.unetChunk1URL, urls.unetChunk2URL],
@@ -146,6 +173,30 @@ enum CloverPipelineFactory {
             configuration: configuration
         )
 
+        let unet = makeStatefulUnet(
+            modelURL: urls.unetURL,
+            adapter: adapter,
+            configuration: configuration
+        )
+        let decoder = Decoder(
+            modelAt: urls.decoderURL,
+            configuration: configuration
+        )
+        return StableDiffusionPipeline(
+            textEncoder: textEncoder,
+            unet: unet,
+            decoder: decoder,
+            encoder: nil,
+            safetyChecker: nil,
+            reduceMemory: true
+        )
+    }
+
+    private static func makeStatefulUnet(
+        modelURL: URL,
+        adapter: LoRAAdapter?,
+        configuration: MLModelConfiguration
+    ) -> Unet {
         let unetConfiguration = configuration.copy()
             as! MLModelConfiguration
         let fallbackComputeUnits: MLComputeUnits?
@@ -160,23 +211,11 @@ enum CloverPipelineFactory {
         unetConfiguration.computeUnits = .cpuAndGPU
         fallbackComputeUnits = .cpuOnly
         #endif
-        let unet = Unet(
-            modelAt: urls.unetURL,
+        return Unet(
+            modelAt: modelURL,
             configuration: unetConfiguration,
             loraAdapter: adapter,
             fallbackComputeUnits: fallbackComputeUnits
-        )
-        let decoder = Decoder(
-            modelAt: urls.decoderURL,
-            configuration: configuration
-        )
-        return StableDiffusionPipeline(
-            textEncoder: textEncoder,
-            unet: unet,
-            decoder: decoder,
-            encoder: nil,
-            safetyChecker: nil,
-            reduceMemory: true
         )
     }
 }

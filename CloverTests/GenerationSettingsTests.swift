@@ -176,6 +176,52 @@ final class GenerationSettingsTests: XCTestCase {
         )
     }
 
+    func testMultipleStyleTriggersAreAddedInSelectionOrder() {
+        var settings = GenerationSettings()
+        settings.prompt = "a garden at sunrise"
+
+        settings.applyStyleTriggers(
+            ["Monet Style", "pointillism painting"],
+            replacing: []
+        )
+
+        XCTAssertEqual(
+            settings.prompt,
+            "Monet Style, pointillism painting, a garden at sunrise"
+        )
+    }
+
+    func testRemovingOneStyleKeepsTheOtherTrigger() {
+        var settings = GenerationSettings()
+        settings.prompt = "Monet Style, pointillism painting, a garden"
+
+        settings.applyStyleTriggers(
+            ["pointillism painting"],
+            replacing: ["Monet Style", "pointillism painting"]
+        )
+
+        XCTAssertEqual(settings.prompt, "pointillism painting, a garden")
+    }
+
+    func testLegacySingleStyleMigratesToStyleIDs() throws {
+        let settings = try JSONDecoder().decode(
+            GenerationSettings.self,
+            from: Data("{\"modelID\":\"monet\"}".utf8)
+        )
+
+        XCTAssertEqual(settings.modelID, "base")
+        XCTAssertEqual(settings.styleIDs, ["monet"])
+    }
+
+    func testStyleStrengthIsClamped() {
+        var settings = GenerationSettings()
+        settings.styleIDs = ["monet"]
+
+        settings.setStyleStrength(9, for: "monet")
+
+        XCTAssertEqual(settings.styleStrength(for: "monet"), 1.5)
+    }
+
     func testReturningToCloverRemovesTheStyleTriggerPrefix() {
         var settings = GenerationSettings()
         settings.prompt = "watercolor anime, a quiet city"
@@ -709,6 +755,10 @@ final class GenerationSettingsTests: XCTestCase {
 
     func testBootstrapStylesExposeExactLoRASize() {
         XCTAssertEqual(
+            ModelCatalog.bootstrap.common.downloadSize,
+            1_603_241_669
+        )
+        XCTAssertEqual(
             ModelCatalog.bootstrap.styleVariants.map(\.downloadSize),
             [6_927_128, 6_927_128, 6_927_128]
         )
@@ -728,7 +778,7 @@ final class GenerationSettingsTests: XCTestCase {
         let header = try JSONSerialization.data(withJSONObject: [
             "lora.down.weight": [
                 "dtype": "F32",
-                "shape": [1],
+                "shape": [1, 1],
                 "data_offsets": [0, 4],
             ],
         ])
@@ -752,7 +802,7 @@ final class GenerationSettingsTests: XCTestCase {
               "states": [{
                 "source_key": "lora.down.weight",
                 "state_name": "lora_down",
-                "shape": [1],
+                "shape": [1, 1, 1, 1],
                 "element_count": 1
               }]
             }
@@ -767,6 +817,70 @@ final class GenerationSettingsTests: XCTestCase {
         )
         XCTAssertEqual(adapter.fileSize, weights.count)
         XCTAssertEqual(adapter.tensorCount, 1)
+    }
+
+    func testLoRAAdapterAcceptsMultipleWeightsWithSlotSchema() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(
+            path: UUID().uuidString,
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: folder,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let header = try JSONSerialization.data(withJSONObject: [
+            "unet.block.lora.down.weight": [
+                "dtype": "F32",
+                "shape": [1, 1, 1, 1],
+                "data_offsets": [0, 4],
+            ],
+        ])
+        func makeWeights(_ value: Float, name: String) throws -> URL {
+            var weights = Data()
+            var headerLength = UInt64(header.count).littleEndian
+            withUnsafeBytes(of: &headerLength) {
+                weights.append(contentsOf: $0)
+            }
+            weights.append(header)
+            var bits = value.bitPattern.littleEndian
+            withUnsafeBytes(of: &bits) {
+                weights.append(contentsOf: $0)
+            }
+            let url = folder.appending(path: name)
+            try weights.write(to: url)
+            return url
+        }
+        let first = try makeWeights(0.25, name: "first.safetensors")
+        let second = try makeWeights(0.75, name: "second.safetensors")
+        let schemaURL = folder.appending(path: "adapter-schema.json")
+        try Data(
+            """
+            {
+              "schema_version": 2,
+              "max_adapter_count": 3,
+              "states": [{
+                "source_key": "unet.block.lora.down.weight",
+                "state_name": "block_lora_down",
+                "shape": [1, 1, 1, 1],
+                "state_shape": [3, 1, 1, 1],
+                "element_count": 1
+              }]
+            }
+            """.utf8
+        ).write(to: schemaURL)
+
+        let adapter = try LoRAAdapter(
+            weightedWeights: [
+                .init(url: first, scale: 0.5),
+                .init(url: second, scale: 1.25),
+            ],
+            schemaAt: schemaURL
+        )
+
+        XCTAssertEqual(adapter.maxAdapterCount, 3)
+        XCTAssertEqual(adapter.tensorCount, 2)
     }
 
 }

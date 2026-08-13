@@ -70,10 +70,13 @@ struct GenerationSettings: Codable, Equatable, Sendable {
     var randomGenerator = RandomGenerator.numpy
     var computeTarget = ComputeTarget.neuralEngine
     var modelID = "base"
+    var styleIDs: [String] = []
+    var styleStrengths: [String: Double] = [:]
     var livePreviewEnabled = false
     var previewInterval = 5
 
     static let defaultsKey = "generation-settings"
+    static let maximumStyleCount = 3
 
     enum CodingKeys: String, CodingKey {
         case prompt
@@ -86,6 +89,8 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         case randomGenerator
         case computeTarget
         case modelID
+        case styleIDs
+        case styleStrengths
         case livePreviewEnabled
         case previewInterval
     }
@@ -141,10 +146,26 @@ struct GenerationSettings: Codable, Equatable, Sendable {
             ComputeTarget.self,
             forKey: .computeTarget
         ) ?? defaults.computeTarget
-        modelID = try container.decodeIfPresent(
+        let decodedModelID = try container.decodeIfPresent(
             String.self,
             forKey: .modelID
         ) ?? defaults.modelID
+        let decodedStyleIDs = try container.decodeIfPresent(
+            [String].self,
+            forKey: .styleIDs
+        ) ?? (decodedModelID == "base" ? [] : [decodedModelID])
+        styleIDs = Array(
+            decodedStyleIDs
+                .filter { $0 != "base" }
+                .uniqued()
+                .prefix(Self.maximumStyleCount)
+        )
+        styleStrengths = try container.decodeIfPresent(
+            [String: Double].self,
+            forKey: .styleStrengths
+        ) ?? [:]
+        styleStrengths = styleStrengths.filter { styleIDs.contains($0.key) }
+        modelID = "base"
         livePreviewEnabled = try container.decodeIfPresent(
             Bool.self,
             forKey: .livePreviewEnabled
@@ -197,21 +218,31 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         _ trigger: String?,
         replacing previousTrigger: String?
     ) {
+        applyStyleTriggers(
+            trigger.map { [$0] } ?? [],
+            replacing: previousTrigger.map { [$0] } ?? []
+        )
+    }
+
+    mutating func applyStyleTriggers(
+        _ triggers: [String],
+        replacing previousTriggers: [String]
+    ) {
         var content = prompt
 
-        if let previousTrigger {
+        for previousTrigger in previousTriggers where !previousTrigger.isEmpty {
             content = Self.removingTriggerPrefix(
                 previousTrigger,
                 from: content
             )
         }
 
-        guard let trigger, !trigger.isEmpty else {
+        let newTriggers = triggers.filter { !$0.isEmpty }.uniqued()
+        guard !newTriggers.isEmpty else {
             prompt = content
             return
         }
-
-        if Self.hasTriggerPrefix(trigger, in: content) {
+        if Self.hasTriggerPrefixes(newTriggers, in: content) {
             prompt = content
             return
         }
@@ -219,9 +250,17 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         let trimmedContent = content.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
-        prompt = trimmedContent.isEmpty
-            ? "\(trigger), "
-            : "\(trigger), \(trimmedContent)"
+        let prefix = newTriggers.joined(separator: ", ")
+        prompt = trimmedContent.isEmpty ? "\(prefix), " : "\(prefix), \(trimmedContent)"
+    }
+
+    mutating func setStyleStrength(_ value: Double, for id: String) {
+        guard styleIDs.contains(id) else { return }
+        styleStrengths[id] = min(max(value, 0), 1.5)
+    }
+
+    func styleStrength(for id: String) -> Double {
+        min(max(styleStrengths[id] ?? 1, 0), 1.5)
     }
 
     private static func hasTriggerPrefix(
@@ -232,6 +271,20 @@ struct GenerationSettings: Codable, Equatable, Sendable {
             of: "\(trigger),",
             options: [.anchored, .caseInsensitive]
         ) != nil
+    }
+
+    private static func hasTriggerPrefixes(
+        _ triggers: [String],
+        in prompt: String
+    ) -> Bool {
+        var remainder = prompt
+        for trigger in triggers {
+            guard hasTriggerPrefix(trigger, in: remainder) else {
+                return false
+            }
+            remainder = removingTriggerPrefix(trigger, from: remainder)
+        }
+        return true
     }
 
     private static func removingTriggerPrefix(
@@ -262,6 +315,10 @@ struct GenerationSnapshot: Codable, Equatable, Sendable {
     let randomGenerator: GenerationSettings.RandomGenerator
     let computeTarget: GenerationSettings.ComputeTarget
     let modelID: String?
+    // Optional so artwork saved by releases predating style mixing continues
+    // to decode from the on-device library.
+    let styleIDs: [String]?
+    let styleStrengths: [String: Double]?
 
     init(settings: GenerationSettings, imageIndex: Int) {
         prompt = settings.trimmedPrompt
@@ -274,5 +331,14 @@ struct GenerationSnapshot: Codable, Equatable, Sendable {
         randomGenerator = settings.randomGenerator
         computeTarget = settings.computeTarget
         modelID = settings.modelID
+        styleIDs = settings.styleIDs
+        styleStrengths = settings.styleStrengths
+    }
+}
+
+private extension Sequence where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
     }
 }

@@ -6,6 +6,7 @@ struct ModelPickerView: View {
     let manager: ModelManager
 
     @State private var confirmingBaseRemoval = false
+    @State private var styleLimitMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -13,6 +14,7 @@ struct ModelPickerView: View {
                 cloverSection
                 stylesSection
                 importedSection
+                styleMixSection
                 catalogSection
             }
             .navigationTitle("Models & Styles")
@@ -52,6 +54,17 @@ struct ModelPickerView: View {
             } message: {
                 Text(manager.errorMessage ?? "")
             }
+            .alert(
+                "Style Limit",
+                isPresented: Binding(
+                    get: { styleLimitMessage != nil },
+                    set: { if !$0 { styleLimitMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(styleLimitMessage ?? "")
+            }
         }
         .presentationDetents([.large])
     }
@@ -65,7 +78,7 @@ struct ModelPickerView: View {
                 ModelVariantRow(
                     variant: base,
                     state: manager.state(for: base.id),
-                    isSelected: settings.modelID == base.id,
+                    isSelected: settings.styleIDs.isEmpty,
                     isLocked: false,
                     downloadSize: manager.requiredDownloadSize(for: base),
                     canDownload: manager.canDownload(base),
@@ -87,10 +100,7 @@ struct ModelPickerView: View {
                 titleVisibility: .visible
             ) {
                 Button("Remove Downloads", role: .destructive) {
-                    if settings.modelID != base.id {
-                        settings.modelID = base.id
-                        settings.persist()
-                    }
+                    select(base.id)
                     manager.remove(base)
                 }
                 Button("Cancel", role: .cancel) {}
@@ -111,7 +121,7 @@ struct ModelPickerView: View {
                     ModelVariantRow(
                         variant: style,
                         state: manager.state(for: style.id),
-                        isSelected: settings.modelID == style.id,
+                        isSelected: settings.styleIDs.contains(style.id),
                         isLocked: manager.isLocked(style),
                         downloadSize: manager.requiredDownloadSize(for: style),
                         canDownload: manager.canDownload(style),
@@ -126,7 +136,7 @@ struct ModelPickerView: View {
             } footer: {
                 Text(
                     manager.isBaseInstalled
-                        ? "Each style is a named 6.9 MB LoRA file that reuses the one-time Clover download. Include the trigger shown under the style in your prompt."
+                        ? "Mix up to \(GenerationSettings.maximumStyleCount) downloaded LoRAs. Clover adds their trigger phrases and lets you tune each strength below."
                         : "Install Clover above to unlock these styles."
                 )
             }
@@ -156,7 +166,7 @@ struct ModelPickerView: View {
                 ForEach(manager.imported) { style in
                     ImportedStyleRow(
                         style: style,
-                        isSelected: settings.modelID == style.id,
+                        isSelected: settings.styleIDs.contains(style.id),
                         isLocked: style.requiresClover
                             && !manager.isBaseInstalled,
                         select: { select(style.id) }
@@ -166,7 +176,6 @@ struct ModelPickerView: View {
 
             Button {
                 manager.refreshImported()
-                HapticManager.selection()
             } label: {
                 Label("Rescan Files", systemImage: "arrow.clockwise")
             }
@@ -176,6 +185,42 @@ struct ModelPickerView: View {
             Text(
                 "Drop a Clover-compatible .safetensors file into On My iPhone › Clover › Imported Styles. The app detects it and loads the style into your installed Clover model."
             )
+        }
+    }
+
+    @ViewBuilder
+    private var styleMixSection: some View {
+        if !settings.styleIDs.isEmpty {
+            Section {
+                ForEach(settings.styleIDs, id: \.self) { id in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(manager.displayName(for: id) ?? "Imported Style")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(settings.styleStrength(for: id), format: .number.precision(.fractionLength(2)))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(
+                            value: Binding(
+                                get: { settings.styleStrength(for: id) },
+                                set: {
+                                    settings.setStyleStrength($0, for: id)
+                                    settings.persist()
+                                }
+                            ),
+                            in: 0...1.5,
+                            step: 0.05
+                        )
+                        .accessibilityLabel("\(manager.displayName(for: id) ?? "Style") strength")
+                    }
+                }
+            } header: {
+                Text("Style Mix")
+            } footer: {
+                Text("Strength 1.00 uses the LoRA as trained. Lower values soften it; values above 1.00 make it more pronounced.")
+            }
         }
     }
 
@@ -192,26 +237,39 @@ struct ModelPickerView: View {
     // MARK: - Actions
 
     private func select(_ id: String) {
-        let previousTrigger = manager.variant(
-            id: settings.modelID
-        )?.trigger
-        let trigger = manager.variant(id: id)?.trigger
-
-        settings.applyStyleTrigger(
-            trigger,
-            replacing: previousTrigger
+        let previousIDs = settings.styleIDs
+        var nextIDs = previousIDs
+        if id == ModelManager.baseID {
+            nextIDs.removeAll()
+        } else if let index = nextIDs.firstIndex(of: id) {
+            nextIDs.remove(at: index)
+            settings.styleStrengths[id] = nil
+        } else {
+            guard nextIDs.count < GenerationSettings.maximumStyleCount else {
+                styleLimitMessage = "Remove a selected style before adding another. This Core ML model can mix up to \(GenerationSettings.maximumStyleCount) LoRAs at once."
+                return
+            }
+            nextIDs.append(id)
+            settings.styleStrengths[id] = 1
+        }
+        settings.applyStyleTriggers(
+            triggers(for: nextIDs),
+            replacing: triggers(for: previousIDs)
         )
-        settings.modelID = id
+        settings.styleIDs = nextIDs
+        settings.modelID = ModelManager.baseID
         settings.persist()
-        HapticManager.selection()
     }
 
     private func removeStyle(_ style: ModelCatalog.Variant) {
-        if settings.modelID == style.id {
-            settings.modelID = ModelManager.baseID
-            settings.persist()
+        if settings.styleIDs.contains(style.id) {
+            select(style.id)
         }
         manager.remove(style)
+    }
+
+    private func triggers(for ids: [String]) -> [String] {
+        ids.compactMap { manager.variant(id: $0)?.trigger }
     }
 
     private var formattedCloverSize: String {
@@ -285,7 +343,7 @@ private struct ModelVariantRow: View {
         .padding(.vertical, 4)
         .contentShape(.rect)
         .onTapGesture {
-            if state == .installed, !isSelected { select() }
+            if state == .installed { select() }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("model-\(variant.id)")
@@ -310,11 +368,11 @@ private struct ModelVariantRow: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title3)
                         .foregroundStyle(.cloverGreen)
-                        .accessibilityLabel("\(variant.name), selected")
+                        .accessibilityLabel("\(variant.name), selected. Tap row to remove")
                 } else {
-                    Button("Use", action: select)
+                    Button("Add", action: select)
                         .buttonStyle(.borderless)
-                        .accessibilityLabel("Use \(variant.name)")
+                        .accessibilityLabel("Add \(variant.name)")
                 }
 
                 Menu {
@@ -414,15 +472,15 @@ private struct ImportedStyleRow: View {
                     .foregroundStyle(.cloverGreen)
                     .accessibilityLabel("\(style.name), selected")
             } else {
-                Button("Use", action: select)
+                Button("Add", action: select)
                     .buttonStyle(.borderless)
-                    .accessibilityLabel("Use \(style.name)")
+                    .accessibilityLabel("Add \(style.name)")
             }
         }
         .padding(.vertical, 4)
         .contentShape(.rect)
         .onTapGesture {
-            if !isSelected, !isLocked { select() }
+            if !isLocked { select() }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("imported-\(style.name)")

@@ -9,10 +9,12 @@ import Foundation
 public struct LoRAAdapter: @unchecked Sendable {
     private struct Schema: Decodable {
         let schemaVersion: Int
+        let maxAdapterCount: Int?
         let states: [StateMapping]
 
         enum CodingKeys: String, CodingKey {
             case schemaVersion = "schema_version"
+            case maxAdapterCount = "max_adapter_count"
             case states
         }
     }
@@ -21,13 +23,19 @@ public struct LoRAAdapter: @unchecked Sendable {
         let sourceKey: String
         let stateName: String
         let shape: [Int]
+        let stateShape: [Int]?
         let elementCount: Int
 
         enum CodingKeys: String, CodingKey {
             case sourceKey = "source_key"
             case stateName = "state_name"
             case shape
+            case stateShape = "state_shape"
             case elementCount = "element_count"
+        }
+
+        var resolvedStateShape: [Int] {
+            stateShape ?? shape
         }
     }
 
@@ -42,6 +50,22 @@ public struct LoRAAdapter: @unchecked Sendable {
         }
     }
 
+    private struct Component: Sendable {
+        let weights: Data
+        let tensors: [String: TensorDescriptor]
+        let scale: Float
+    }
+
+    public struct WeightedWeights: Sendable {
+        public let url: URL
+        public let scale: Float
+
+        public init(url: URL, scale: Float = 1) {
+            self.url = url
+            self.scale = scale
+        }
+    }
+
     public enum AdapterError: LocalizedError {
         case malformedWeights
         case unsupportedSchema(Int)
@@ -49,6 +73,7 @@ public struct LoRAAdapter: @unchecked Sendable {
         case unsupportedTensorType(String)
         case incompatibleTensor(String)
         case incompatibleState(String)
+        case tooManyAdapters(maximum: Int)
 
         public var errorDescription: String? {
             switch self {
@@ -64,85 +89,222 @@ public struct LoRAAdapter: @unchecked Sendable {
                 "LoRA tensor \(name) has an incompatible shape or size."
             case let .incompatibleState(name):
                 "Core ML adapter state \(name) is incompatible."
+            case let .tooManyAdapters(maximum):
+                "This Clover model supports up to \(maximum) simultaneous styles."
             }
         }
     }
 
-    private let weights: Data
+    private let components: [Component]
     private let mappings: [StateMapping]
-    private let tensors: [String: TensorDescriptor]
 
     public let fileSize: Int
-    public var tensorCount: Int { tensors.count }
+    public let maxAdapterCount: Int
+    public var tensorCount: Int {
+        components.reduce(0) { $0 + $1.tensors.count }
+    }
 
     public init(weightsAt weightsURL: URL, schemaAt schemaURL: URL) throws {
-        let weights = try Data(contentsOf: weightsURL, options: .mappedIfSafe)
+        try self.init(
+            weightedWeights: [WeightedWeights(url: weightsURL)],
+            schemaAt: schemaURL
+        )
+    }
+
+    public init(
+        weightedWeights: [WeightedWeights],
+        schemaAt schemaURL: URL
+    ) throws {
+        guard !weightedWeights.isEmpty else {
+            throw AdapterError.malformedWeights
+        }
         let schema = try JSONDecoder().decode(
             Schema.self,
             from: Data(contentsOf: schemaURL)
         )
-        guard schema.schemaVersion == 1 else {
+        guard schema.schemaVersion == 1 || schema.schemaVersion == 2 else {
             throw AdapterError.unsupportedSchema(schema.schemaVersion)
         }
-        let tensors = try Self.parseHeader(weights)
+        let maxAdapterCount = schema.schemaVersion == 1
+            ? 1
+            : max(schema.maxAdapterCount ?? 0, 0)
+        guard maxAdapterCount > 0 else {
+            throw AdapterError.unsupportedSchema(schema.schemaVersion)
+        }
+        guard weightedWeights.count <= maxAdapterCount else {
+            throw AdapterError.tooManyAdapters(maximum: maxAdapterCount)
+        }
+        let components = try weightedWeights.map { selection in
+            let weights = try Data(
+                contentsOf: selection.url,
+                options: .mappedIfSafe
+            )
+            return Component(
+                weights: weights,
+                tensors: try Self.parseHeader(weights),
+                scale: selection.scale
+            )
+        }
 
         for mapping in schema.states {
-            guard let tensor = tensors[mapping.sourceKey] else {
-                throw AdapterError.missingTensor(mapping.sourceKey)
-            }
-            guard tensor.elementCount == mapping.elementCount,
-                  mapping.shape.reduce(1, *) == mapping.elementCount else {
+            guard mapping.shape.reduce(1, *) == mapping.elementCount,
+                  Self.isCompatible(
+                      sourceShape: mapping.shape,
+                      stateShape: mapping.resolvedStateShape,
+                      sourceKey: mapping.sourceKey,
+                      maxAdapterCount: maxAdapterCount
+                  ) else {
                 throw AdapterError.incompatibleTensor(mapping.sourceKey)
+            }
+            for component in components {
+                guard let tensor = component.tensors[mapping.sourceKey] else {
+                    throw AdapterError.missingTensor(mapping.sourceKey)
+                }
+                guard tensor.elementCount == mapping.elementCount,
+                      Self.shapesAreEquivalent(
+                          tensor.shape,
+                          mapping.shape
+                      ) else {
+                    throw AdapterError.incompatibleTensor(mapping.sourceKey)
+                }
             }
         }
 
-        self.weights = weights
+        self.components = components
         self.mappings = schema.states
-        self.tensors = tensors
-        fileSize = weights.count
+        self.maxAdapterCount = maxAdapterCount
+        fileSize = components.reduce(0) { $0 + $1.weights.count }
     }
 
     public func populate(_ state: MLState) throws {
         for mapping in mappings {
-            guard let tensor = tensors[mapping.sourceKey] else {
-                throw AdapterError.missingTensor(mapping.sourceKey)
-            }
             try state.withMultiArray(for: mapping.stateName) { destination in
                 guard destination.dataType == .float16,
-                      destination.count == mapping.elementCount else {
+                      destination.count == mapping.resolvedStateShape.reduce(1, *) else {
                     throw AdapterError.incompatibleState(mapping.stateName)
                 }
                 try destination.withUnsafeMutableBufferPointer(
                     ofType: Float16.self
                 ) { output, _ in
-                    try weights.withUnsafeBytes { bytes in
-                        switch tensor.dtype {
-                        case "F32":
-                            for index in 0..<mapping.elementCount {
-                                let bits = bytes.loadUnaligned(
-                                    fromByteOffset: tensor.start + index * 4,
-                                    as: UInt32.self
-                                ).littleEndian
-                                output[index] = Float16(
-                                    Float(bitPattern: bits)
+                    output.initialize(repeating: 0)
+                    for (slot, component) in components.enumerated() {
+                        guard let tensor = component.tensors[mapping.sourceKey] else {
+                            throw AdapterError.missingTensor(mapping.sourceKey)
+                        }
+                        try component.weights.withUnsafeBytes { bytes in
+                            for sourceIndex in 0..<mapping.elementCount {
+                                let value = try Self.readValue(
+                                    bytes: bytes,
+                                    tensor: tensor,
+                                    index: sourceIndex
                                 )
+                                let destinationIndex = try Self.destinationIndex(
+                                    sourceIndex: sourceIndex,
+                                    sourceShape: mapping.shape,
+                                    stateShape: mapping.resolvedStateShape,
+                                    sourceKey: mapping.sourceKey,
+                                    slot: slot
+                                )
+                                let scale = mapping.sourceKey.contains(".lora.up.")
+                                    ? component.scale
+                                    : 1
+                                output[destinationIndex] = Float16(value * scale)
                             }
-                        case "F16":
-                            for index in 0..<mapping.elementCount {
-                                let bits = bytes.loadUnaligned(
-                                    fromByteOffset: tensor.start + index * 2,
-                                    as: UInt16.self
-                                ).littleEndian
-                                output[index] = Float16(bitPattern: bits)
-                            }
-                        default:
-                            throw AdapterError.unsupportedTensorType(
-                                tensor.dtype
-                            )
                         }
                     }
                 }
             }
+        }
+    }
+
+    private static func isCompatible(
+        sourceShape: [Int],
+        stateShape: [Int],
+        sourceKey: String,
+        maxAdapterCount: Int
+    ) -> Bool {
+        guard sourceShape.count == 4, stateShape.count == 4 else {
+            return sourceShape == stateShape && maxAdapterCount == 1
+        }
+        if sourceKey.contains(".lora.down.") {
+            return stateShape[0] == sourceShape[0] * maxAdapterCount
+                && stateShape.dropFirst() == sourceShape.dropFirst()
+        }
+        if sourceKey.contains(".lora.up.") {
+            return stateShape[1] == sourceShape[1] * maxAdapterCount
+                && stateShape[0] == sourceShape[0]
+                && stateShape.dropFirst(2) == sourceShape.dropFirst(2)
+        }
+        return sourceShape == stateShape && maxAdapterCount == 1
+    }
+
+    /// Safetensors stores LoRA linear matrices as 2-D tensors, while Core ML
+    /// exposes the same values as 1x1 convolution state with two trailing
+    /// singleton dimensions.
+    private static func shapesAreEquivalent(
+        _ lhs: [Int],
+        _ rhs: [Int]
+    ) -> Bool {
+        func removingTrailingSingletons(_ shape: [Int]) -> [Int] {
+            var result = shape
+            while result.last == 1 {
+                result.removeLast()
+            }
+            return result
+        }
+        return removingTrailingSingletons(lhs)
+            == removingTrailingSingletons(rhs)
+    }
+
+    private static func destinationIndex(
+        sourceIndex: Int,
+        sourceShape: [Int],
+        stateShape: [Int],
+        sourceKey: String,
+        slot: Int
+    ) throws -> Int {
+        guard sourceShape.count == 4, stateShape.count == 4 else {
+            guard slot == 0 else {
+                throw AdapterError.incompatibleTensor(sourceKey)
+            }
+            return sourceIndex
+        }
+        if sourceKey.contains(".lora.down.") {
+            return slot * sourceShape.reduce(1, *) + sourceIndex
+        }
+        if sourceKey.contains(".lora.up.") {
+            let sourceRank = sourceShape[1]
+            let stateRank = stateShape[1]
+            let row = sourceIndex / sourceRank
+            let column = sourceIndex % sourceRank
+            return row * stateRank + slot * sourceRank + column
+        }
+        guard slot == 0 else {
+            throw AdapterError.incompatibleTensor(sourceKey)
+        }
+        return sourceIndex
+    }
+
+    private static func readValue(
+        bytes: UnsafeRawBufferPointer,
+        tensor: TensorDescriptor,
+        index: Int
+    ) throws -> Float {
+        switch tensor.dtype {
+        case "F32":
+            let bits = bytes.loadUnaligned(
+                fromByteOffset: tensor.start + index * 4,
+                as: UInt32.self
+            ).littleEndian
+            return Float(bitPattern: bits)
+        case "F16":
+            let bits = bytes.loadUnaligned(
+                fromByteOffset: tensor.start + index * 2,
+                as: UInt16.self
+            ).littleEndian
+            return Float(Float16(bitPattern: bits))
+        default:
+            throw AdapterError.unsupportedTensorType(tensor.dtype)
         }
     }
 

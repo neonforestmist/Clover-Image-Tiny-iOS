@@ -171,7 +171,7 @@ enum ModelStorage {
             .appending(path: revision, directoryHint: .isDirectory)
     }
 
-    private static var sharedRootURL: URL {
+    static var sharedRootURL: URL {
         rootURL.appending(path: "Shared", directoryHint: .isDirectory)
     }
 
@@ -238,6 +238,22 @@ enum ModelStorage {
     static func importedWeightsURL(for id: String) -> URL? {
         guard id.hasPrefix(importedIDPrefix) else { return nil }
         return importedStyles().first { $0.id == id }?.weightsURL
+    }
+
+    /// Resolves either a downloaded catalog style or a Files-imported style
+    /// to the small safetensors payload consumed by Clover's stateful U-Net.
+    static func styleWeightsURL(for id: String) -> URL? {
+        if let imported = importedWeightsURL(for: id) {
+            return imported
+        }
+        guard id != "base", let resources = resourcesURL(for: id) else {
+            return nil
+        }
+        let weights = resources.appending(path: "Adapter.safetensors")
+        guard FileManager.default.fileExists(atPath: weights.path) else {
+            return nil
+        }
+        return weights
     }
 
     static func recordInstallation(id: String, resourcesURL: URL) {

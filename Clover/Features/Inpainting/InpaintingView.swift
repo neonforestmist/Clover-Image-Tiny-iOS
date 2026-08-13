@@ -5,6 +5,7 @@ import UIKit
 struct InpaintingView: View {
     let library: ArtworkLibrary
     let modelManager: InpaintingModelManager
+    let styleManager: ModelManager
 
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var sourceImage: CGImage?
@@ -27,12 +28,15 @@ struct InpaintingView: View {
 
     private enum InpaintingSheet: Identifiable {
         case settings
+        case styles
         case crop(InpaintingCropSource)
 
         var id: String {
             switch self {
             case .settings:
                 "settings"
+            case .styles:
+                "styles"
             case let .crop(source):
                 "crop-\(source.id.uuidString)"
             }
@@ -72,6 +76,11 @@ struct InpaintingView: View {
             switch destination {
             case .settings:
                 InpaintingSettingsSheet(settings: $settings)
+            case .styles:
+                ModelPickerView(
+                    settings: $settings,
+                    manager: styleManager
+                )
             case let .crop(source):
                 InpaintingCropSheet(image: source.image) { croppedImage in
                     applySourceImage(croppedImage)
@@ -80,6 +89,7 @@ struct InpaintingView: View {
         }
         .task {
             await modelManager.refresh()
+            await styleManager.refreshCatalog()
         }
         .task(id: selectedPhoto) {
             await loadSelectedPhoto()
@@ -396,6 +406,20 @@ struct InpaintingView: View {
                 destination: URL(string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML")!
             )
             .font(.caption.weight(.semibold))
+
+            Button {
+                presentedSheet = .styles
+            } label: {
+                Label(
+                    settings.styleIDs.isEmpty
+                        ? "Add Styles"
+                        : "Edit \(settings.styleIDs.count) Active \(settings.styleIDs.count == 1 ? "Style" : "Styles")",
+                    systemImage: "paintpalette"
+                )
+            }
+            .buttonStyle(.bordered)
+            .disabled(isWorking)
+            .accessibilityIdentifier("inpainting-style-picker")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
@@ -439,6 +463,7 @@ struct InpaintingView: View {
             && !strokes.isEmpty
             && !settings.trimmedPrompt.isEmpty
             && modelManager.isInstalled
+            && settings.styleIDs.allSatisfy(styleManager.isInstalled)
     }
 
     private func inpaintingPill(_ title: String, systemImage: String) -> some View {
@@ -873,7 +898,8 @@ private enum MaskRenderer {
     NavigationStack {
         InpaintingView(
             library: .preview,
-            modelManager: InpaintingModelManager()
+            modelManager: InpaintingModelManager(),
+            styleManager: ModelManager(previewInstalled: true)
         )
     }
 }

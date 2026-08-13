@@ -28,6 +28,7 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 - Dedicated **Inpainting** tab between Create and Library for image selection,
   mask painting, and local edits
 - Base-first downloads: install Clover, then add only the styles you want
+- Mix up to three downloaded or imported LoRAs with independent strengths
 - Import a Clover-compatible `.safetensors` style from **On My iPhone → Clover → Imported Styles**
 - Visible downloads in **On My iPhone → Clover → Models**
 - Immutable model revisions with byte-count and SHA-256 verification
@@ -64,19 +65,15 @@ Clover installs first: its shared components (text encoder, VAE, safety
 checker, tokenizer) plus one stateful base U-Net, about 1.5 GB total. Monet,
 Pointillism, and Watercolor Anime are then **optional 6,927,128-byte LoRA
 style downloads**: `Monet.safetensors`, `Pointillism.safetensors`, and
-`Watercolor-Anime.safetensors`. The Swift pipeline converts the selected style
-weights to FP16 and loads them into the U-Net's mutable Core ML state; it never
-downloads another ~648 MB U-Net. Each style comes from its compact
+`Watercolor-Anime.safetensors`. The Swift pipeline converts up to three selected
+styles to FP16 and places them into separate rank-16 blocks in the U-Net's
+mutable Core ML state; it never downloads another ~648 MB U-Net. Each style comes from its compact
 `-lora-coreml` Hugging Face repo, which contains only the named style weights,
 state mapping, model card, and license. Styles stay locked until Clover is
 installed. You can also side-load a Clover-compatible LoRA by placing its
 `.safetensors` file directly in **On My iPhone → Clover → Imported Styles**.
 The app detects the filename and loads its tensors into the installed Clover
 U-Net. Older full Core ML model folders remain supported.
-
-Output generation remains 512 × 512. The app can save centered 1:1, 4:5, 5:4,
-9:16, 16:9, and custom width:height crops without downloading additional U-Net
-variants.
 
 ## Inpainting resources
 
@@ -162,10 +159,10 @@ still honor the selected compute preference. Validate real generation on an
 iPhone or iPad; the Simulator is suitable for UI testing. The first generation
 may take longer while Core ML compiles and caches its graphs.
 
-The current Core ML U-Net exposes one rank-16 mutable LoRA state, so Clover
-applies one style per generation. Combining arbitrary rank-16 styles exactly
-can require rank 32; supporting that safely needs a new rank-expanded Core ML
-base export and catalog format rather than simply adding two adapter states.
+The current Core ML U-Net exposes three rank-16 blocks inside each mutable LoRA
+state. Clover concatenates the down matrices and weighted up matrices, which
+produces the exact sum of up to three independently selected styles without
+cross terms. Empty blocks stay zero, so the same U-Net also runs base Clover.
 
 ## Project structure
 

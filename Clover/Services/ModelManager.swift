@@ -11,7 +11,7 @@ final class ModelManager {
         case failed(String)
     }
 
-    static let baseID = "base"
+    nonisolated static let baseID = "base"
 
     private(set) var catalog: ModelCatalog
     private(set) var states: [String: InstallState] = [:]

@@ -69,6 +69,7 @@ final class ModelDownloader: Sendable {
                 repository: catalog.common.repository,
                 catalog: catalog,
                 destinationRoot: commonRoot,
+                reusableRevisionsRoot: ModelStorage.sharedRootURL,
                 completedBytes: completedBytes,
                 totalBytes: totalBytes,
                 progress: progress
@@ -80,6 +81,7 @@ final class ModelDownloader: Sendable {
             repository: variant.repository,
             catalog: catalog,
             destinationRoot: variantRoot,
+            reusableRevisionsRoot: nil,
             completedBytes: completedBytes,
             totalBytes: totalBytes,
             progress: progress
@@ -104,6 +106,7 @@ final class ModelDownloader: Sendable {
         repository: String?,
         catalog: ModelCatalog,
         destinationRoot: URL,
+        reusableRevisionsRoot: URL?,
         completedBytes: Int64,
         totalBytes: Int64,
         progress: @escaping @Sendable (Double) -> Void
@@ -118,6 +121,17 @@ final class ModelDownloader: Sendable {
             try Task.checkCancellation()
             let destination = destinationRoot.appending(path: file.path)
             if try isValid(file: file, at: destination) {
+                completedBytes += file.size
+                progress(fraction(completedBytes, totalBytes))
+                continue
+            }
+            if let reusableRevisionsRoot,
+               try reuseVerifiedFile(
+                   file,
+                   at: destination,
+                   from: reusableRevisionsRoot,
+                   excluding: destinationRoot
+               ) {
                 completedBytes += file.size
                 progress(fraction(completedBytes, totalBytes))
                 continue
@@ -149,6 +163,49 @@ final class ModelDownloader: Sendable {
             completedBytes += file.size
         }
         return completedBytes
+    }
+
+    /// Reuses byte-identical resources from an older shared revision. A hard
+    /// link consumes no additional model storage; copying is a safe fallback
+    /// on filesystems that reject links. Every candidate is verified against
+    /// the new manifest before it is accepted.
+    private func reuseVerifiedFile(
+        _ file: ModelCatalog.ResourceFile,
+        at destination: URL,
+        from revisionsRoot: URL,
+        excluding destinationRoot: URL
+    ) throws -> Bool {
+        let fileManager = FileManager.default
+        guard let revisions = try? fileManager.contentsOfDirectory(
+            at: revisionsRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+        for revision in revisions where revision.standardizedFileURL
+            != destinationRoot.standardizedFileURL {
+            let candidate = revision.appending(path: file.path)
+            guard try isValid(file: file, at: candidate) else { continue }
+            try fileManager.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.removeItem(at: destination)
+            }
+            do {
+                try fileManager.linkItem(at: candidate, to: destination)
+            } catch {
+                try fileManager.copyItem(at: candidate, to: destination)
+            }
+            guard try isValid(file: file, at: destination) else {
+                try? fileManager.removeItem(at: destination)
+                continue
+            }
+            return true
+        }
+        return false
     }
 
     private func assemble(

@@ -134,7 +134,12 @@ struct GenerationSettingsSheet: View {
 
                 Section {
                     LabeledContent("Resolution", value: "512 × 512")
-                    LabeledContent("Model", value: settings.modelID.capitalized)
+                    LabeledContent(
+                        "Styles",
+                        value: settings.styleIDs.isEmpty
+                            ? "None"
+                            : "\(settings.styleIDs.count) active"
+                    )
                     LabeledContent("Runs", value: "On device")
                 }
             }

@@ -113,7 +113,7 @@ struct CreateView: View {
                     .background(.quaternary, in: .circle)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(modelManager.displayName(for: store.settings.modelID) ?? "Clover")
+                    Text(styleDisplayName)
                         .font(.headline)
                         .foregroundStyle(.primary)
                     Text(modelStatus)
@@ -267,7 +267,7 @@ struct CreateView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.large)
             } else {
-                if modelManager.isInstalled(store.settings.modelID) {
+                if selectedModelsAreInstalled {
                     PrimaryGenerationButton(
                         title: "Generate",
                         systemImage: "wand.and.stars",
@@ -303,30 +303,37 @@ struct CreateView: View {
     }
 
     private var selectedVariant: ModelCatalog.Variant? {
-        modelManager.variant(id: store.settings.modelID)
+        store.settings.styleIDs.first.flatMap {
+            modelManager.variant(id: $0)
+        } ?? modelManager.variant(id: ModelManager.baseID)
     }
 
     private var modelStatus: String {
-        switch modelManager.state(for: store.settings.modelID) {
-        case .installed:
-            if let trigger = selectedVariant?.trigger {
-                "Installed · Trigger: \(trigger)"
-            } else {
-                "Installed · Runs on device"
-            }
-        case let .downloading(progress):
-            "Downloading \(progress.formatted(.percent))"
-        case .notInstalled:
-            if store.settings.modelID == "base" {
-                "Tap to download Clover"
-            } else if !modelManager.isBaseInstalled {
-                "Install Clover first to unlock this style"
-            } else {
-                "Tap to add this style"
-            }
-        case .failed:
-            "Download needs attention"
+        guard modelManager.isBaseInstalled else {
+            return "Tap to download Clover"
         }
+        let unavailable = store.settings.styleIDs.filter {
+            !modelManager.isInstalled($0)
+        }
+        if !unavailable.isEmpty {
+            return "A selected style needs to be downloaded again"
+        }
+        if store.settings.styleIDs.isEmpty {
+            return "Installed · Runs on device"
+        }
+        return "\(store.settings.styleIDs.count) \(store.settings.styleIDs.count == 1 ? "style" : "styles") mixed on device"
+    }
+
+    private var styleDisplayName: String {
+        let names = store.settings.styleIDs.compactMap {
+            modelManager.displayName(for: $0)
+        }
+        return names.isEmpty ? "Clover" : names.joined(separator: " + ")
+    }
+
+    private var selectedModelsAreInstalled: Bool {
+        modelManager.isBaseInstalled
+            && store.settings.styleIDs.allSatisfy(modelManager.isInstalled)
     }
 }
 

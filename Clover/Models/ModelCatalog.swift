@@ -116,7 +116,7 @@ struct ModelCatalog: Codable, Equatable, Sendable {
         common: ResourceGroup(
             repository: nil,
             revision: "",
-            downloadSize: 1_603_231_070,
+            downloadSize: 1_603_241_669,
             files: []
         ),
         variants: [
