@@ -5,8 +5,28 @@ import Observation
 struct InpaintingModelManifest: Codable, Sendable {
     struct Resource: Codable, Sendable {
         let path: String
+        let remotePath: String?
         let size: Int64
         let sha256: String
+
+        init(
+            path: String,
+            remotePath: String? = nil,
+            size: Int64,
+            sha256: String
+        ) {
+            self.path = path
+            self.remotePath = remotePath
+            self.size = size
+            self.sha256 = sha256
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case path
+            case remotePath = "remote_path"
+            case size
+            case sha256
+        }
     }
 
     let schemaVersion: Int
@@ -25,7 +45,7 @@ struct InpaintingModelManifest: Codable, Sendable {
         case resources
     }
 
-    static let repositoryRevision = "4ac712613e1599b616fa2ca94e24c06bfe110fca"
+    static let repositoryRevision = "72622be6c2c7fd8cf3d2091a298d9c41a4bcde8c"
     static let revisionMarkerName = ".clover-inpainting-revision"
 
     static let remoteURL = URL(
@@ -59,8 +79,9 @@ struct InpaintingModelManifest: Codable, Sendable {
     }
 
     func downloadURL(for resource: Resource) -> URL {
+        let remotePath = resource.remotePath ?? resource.path
         var components = URLComponents(
-            string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML/resolve/\(Self.repositoryRevision)/\(resource.path)"
+            string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML/resolve/\(Self.repositoryRevision)/\(remotePath)"
         )!
         components.queryItems = [
             URLQueryItem(name: "download", value: "true")
@@ -74,6 +95,7 @@ enum InpaintingModelError: LocalizedError {
     case sizeMismatch(String)
     case checksumMismatch(String)
     case incompletePackage
+    case requiresClover
 
     var errorDescription: String? {
         switch self {
@@ -85,6 +107,8 @@ enum InpaintingModelError: LocalizedError {
             "The inpainting download checksum did not match for \(path)."
         case .incompletePackage:
             "The inpainting model package is incomplete."
+        case .requiresClover:
+            "Download Clover before installing the inpainting model."
         }
     }
 }
@@ -102,12 +126,15 @@ final class InpaintingModelDownloader: Sendable {
             InpaintingModelManifest.self,
             from: data
         )
-        guard manifest.schemaVersion == 1,
+        guard manifest.schemaVersion == 2,
               manifest.resources.contains(where: {
                   $0.path == "VAEEncoder.mlmodelc/model.mil"
               }),
               manifest.resources.contains(where: {
-                  $0.path == "UnetChunk1.mlmodelc/model.mil"
+                  $0.path == "Unet.mlmodelc/model.mil"
+              }),
+              manifest.resources.contains(where: {
+                  $0.path == "adapter-schema.json"
               }) else {
             throw InpaintingModelError.invalidManifest
         }
@@ -125,6 +152,7 @@ final class InpaintingModelDownloader: Sendable {
             at: stagingURL,
             withIntermediateDirectories: true
         )
+        try installSharedCloverResources(into: stagingURL)
 
         var completedBytes: Int64 = 0
         for resource in manifest.resources {
@@ -139,8 +167,8 @@ final class InpaintingModelDownloader: Sendable {
             // A revision marker is the source of truth for the complete
             // installation, but individual files from an older installation
             // can still be reused after they pass the new manifest checksum.
-            // This makes v2 upgrades resumable and avoids downloading shared
-            // text encoder, VAE, and safety-checker weights again.
+            // This makes upgrades resumable and avoids downloading shared
+            // text encoder and VAE decoder weights again.
             let previousResource = finalURL.appending(path: resource.path)
             if try isValid(resource: resource, at: previousResource) {
                 try copyVerifiedResource(
@@ -209,6 +237,80 @@ final class InpaintingModelDownloader: Sendable {
             try FileManager.default.removeItem(at: destination)
         }
         try FileManager.default.copyItem(at: source, to: destination)
+    }
+
+    /// Inpainting has its own U-Net and VAE encoder, but it uses Clover's
+    /// tokenizer, text encoder, and VAE decoder. Hard-linking those immutable
+    /// files keeps a visible, complete Files-app folder without consuming a
+    /// second copy of the main model on device.
+    private func installSharedCloverResources(into destinationRoot: URL) throws {
+        guard let cloverResources = ModelStorage.resourcesURL(for: "base") else {
+            throw InpaintingModelError.requiresClover
+        }
+        for name in [
+            "TextEncoder.mlmodelc",
+            "VAEDecoder.mlmodelc",
+            "vocab.json",
+            "merges.txt",
+        ] {
+            let source = cloverResources.appending(path: name)
+            let destination = destinationRoot.appending(path: name)
+            try linkOrCopyTree(from: source, to: destination)
+        }
+    }
+
+    private func linkOrCopyTree(from source: URL, to destination: URL) throws {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: source.path,
+            isDirectory: &isDirectory
+        ) else {
+            throw InpaintingModelError.requiresClover
+        }
+        if !isDirectory.boolValue {
+            try linkOrCopyFile(from: source, to: destination)
+            return
+        }
+
+        try FileManager.default.createDirectory(
+            at: destination,
+            withIntermediateDirectories: true
+        )
+        guard let enumerator = FileManager.default.enumerator(
+            at: source,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            throw InpaintingModelError.requiresClover
+        }
+        for case let sourceItem as URL in enumerator {
+            let relativePath = sourceItem.path.dropFirst(source.path.count + 1)
+            let destinationItem = destination.appending(path: String(relativePath))
+            let values = try sourceItem.resourceValues(forKeys: [.isDirectoryKey])
+            if values.isDirectory == true {
+                try FileManager.default.createDirectory(
+                    at: destinationItem,
+                    withIntermediateDirectories: true
+                )
+            } else {
+                try linkOrCopyFile(from: sourceItem, to: destinationItem)
+            }
+        }
+    }
+
+    private func linkOrCopyFile(from source: URL, to destination: URL) throws {
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        do {
+            try FileManager.default.linkItem(at: source, to: destination)
+        } catch {
+            try FileManager.default.copyItem(at: source, to: destination)
+        }
     }
 
     private func isValid(

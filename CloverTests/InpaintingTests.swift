@@ -208,7 +208,7 @@ final class InpaintingTests: XCTestCase {
 
     func testInpaintingDownloadSizeUsesMegabytes() {
         let manifest = InpaintingModelManifest(
-            schemaVersion: 1,
+            schemaVersion: 2,
             model: "test",
             baseModel: "test",
             minimumIOS: "18.0",
@@ -223,13 +223,18 @@ final class InpaintingTests: XCTestCase {
 
     func testInpaintingDownloadsUsePinnedCoreMLRevision() {
         let manifest = InpaintingModelManifest(
-            schemaVersion: 1,
+            schemaVersion: 2,
             model: "test",
             baseModel: "test",
             minimumIOS: "18.0",
             resolution: [512, 512],
             resources: [
-                .init(path: "UnetChunk1.mlmodelc/model.mil", size: 1, sha256: "test")
+                .init(
+                    path: "Unet.mlmodelc/model.mil",
+                    remotePath: "hq-v3/Unet.mlmodelc/model.mil",
+                    size: 1,
+                    sha256: "test"
+                )
             ]
         )
 
@@ -241,6 +246,11 @@ final class InpaintingTests: XCTestCase {
         XCTAssertTrue(
             manifest.downloadURL(for: manifest.resources[0]).absoluteString.contains(
                 InpaintingModelManifest.repositoryRevision
+            )
+        )
+        XCTAssertTrue(
+            manifest.downloadURL(for: manifest.resources[0]).absoluteString.contains(
+                "hq-v3/Unet.mlmodelc/model.mil"
             )
         )
     }

@@ -61,9 +61,9 @@ final class CloverUITests: XCTestCase {
         )
         XCTAssertTrue(app.otherElements["model-base"].exists)
 
-        let useMonet = app.buttons["Use Monet"]
-        XCTAssertTrue(useMonet.waitForExistence(timeout: 3))
-        useMonet.tap()
+        let addMonet = app.buttons["Add Monet"]
+        XCTAssertTrue(addMonet.waitForExistence(timeout: 3))
+        addMonet.tap()
         XCTAssertFalse(app.buttons["Remove Download"].exists)
 
         let manageMonet = app.buttons["manage-download-monet"]
@@ -185,9 +185,9 @@ final class CloverUITests: XCTestCase {
             manageMonet.waitForExistence(timeout: 10),
             "The real-model smoke test requires the Monet download"
         )
-        let useMonet = app.buttons["Use Monet"]
-        if useMonet.exists {
-            useMonet.tap()
+        let addMonet = app.buttons["Add Monet"]
+        if addMonet.exists {
+            addMonet.tap()
         }
         app.buttons["Done"].tap()
 

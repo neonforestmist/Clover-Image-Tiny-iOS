@@ -76,7 +76,7 @@ enum ModelStorage {
             "TextEncoder.mlmodelc",
             "VAEEncoder.mlmodelc",
             "VAEDecoder.mlmodelc",
-            "SafetyChecker.mlmodelc",
+            "adapter-schema.json",
             "vocab.json",
             "merges.txt",
         ]
@@ -84,16 +84,6 @@ enum ModelStorage {
             atPath: url
                 .appending(path: "Unet.mlmodelc")
                 .path
-        ) || (
-            FileManager.default.fileExists(
-                atPath: url
-                    .appending(path: "UnetChunk1.mlmodelc")
-                    .path
-            ) && FileManager.default.fileExists(
-                atPath: url
-                    .appending(path: "UnetChunk2.mlmodelc")
-                    .path
-            )
         )
         return hasUnet && required.allSatisfy {
             FileManager.default.fileExists(

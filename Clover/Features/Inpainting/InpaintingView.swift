@@ -362,7 +362,13 @@ struct InpaintingView: View {
                 }
                 Spacer()
 
-                if case .notInstalled = modelManager.state {
+                if !styleManager.isBaseInstalled {
+                    Button("Needs Clover") {}
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(true)
+                        .accessibilityIdentifier("inpainting-requires-clover")
+                } else if case .notInstalled = modelManager.state {
                     Button(downloadButtonTitle) {
                         modelManager.download()
                     }
@@ -475,40 +481,46 @@ struct InpaintingView: View {
     }
 
     private var modelStatusTitle: String {
+        if !styleManager.isBaseInstalled {
+            return "Clover is required"
+        }
         switch modelManager.state {
         case .installed:
-            "Ready on device"
+            return "Ready on device"
         case .checking:
-            "Checking Hugging Face"
+            return "Checking Hugging Face"
         case .downloading:
-            "Downloading Core ML bundle"
+            return "Downloading Core ML bundle"
         case .notInstalled:
-            "Optional inpainting download"
+            return "Optional inpainting download"
         case .failed:
-            "Download needs attention"
+            return "Download needs attention"
         }
     }
 
     private var modelStatusDetail: String {
+        if !styleManager.isBaseInstalled {
+            return "Download the main Clover model first; shared files are reused"
+        }
         switch modelManager.state {
         case .installed:
-            "9-channel SD 1.4-class pipeline"
+            return "High-quality 9-channel pipeline · up to 3 styles"
         case .checking:
-            "Fetching the verified release manifest"
+            return "Fetching the verified release manifest"
         case let .downloading(progress):
             if let manifest = modelManager.manifest {
-                "\(Int(progress * 100))% of \(manifest.totalSizeInMegabytes) · checksummed"
+                return "\(Int(progress * 100))% of \(manifest.totalSizeInMegabytes) · checksummed"
             } else {
-                "\(Int(progress * 100))% · checksummed resources"
+                return "\(Int(progress * 100))% · checksummed resources"
             }
         case .notInstalled:
             if let manifest = modelManager.manifest {
-                "\(manifest.totalSizeInMegabytes) · downloaded only when you enable Inpainting"
+                return "\(manifest.totalSizeInMegabytes) · downloaded only when you enable Inpainting"
             } else {
-                "Downloaded only when you enable Inpainting"
+                return "Downloaded only when you enable Inpainting"
             }
         case let .failed(message):
-            message
+            return message
         }
     }
 

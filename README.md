@@ -61,8 +61,8 @@ Downloaded files are visible in the Files app under
 **On My iPhone → Clover → Models**. Existing downloads from earlier builds are
 migrated into that folder when possible.
 
-Clover installs first: its shared components (text encoder, VAE, safety
-checker, tokenizer) plus one stateful base U-Net, about 1.5 GB total. Monet,
+Clover installs first: its shared components (text encoder, VAE decoder,
+tokenizer) plus one stateful base U-Net, about 1.5 GB total. Monet,
 Pointillism, and Watercolor Anime are then **optional 6,927,128-byte LoRA
 style downloads**: `Monet.safetensors`, `Pointillism.safetensors`, and
 `Watercolor-Anime.safetensors`. The Swift pipeline converts up to three selected
@@ -73,23 +73,24 @@ state mapping, model card, and license. Styles stay locked until Clover is
 installed. You can also side-load a Clover-compatible LoRA by placing its
 `.safetensors` file directly in **On My iPhone → Clover → Imported Styles**.
 The app detects the filename and loads its tensors into the installed Clover
-U-Net. Older full Core ML model folders remain supported.
+U-Net.
 
 ## Inpainting resources
 
-Inpainting is a separate, standalone Core ML pipeline because its U-Net has a
-9-channel input and needs a VAE encoder. It is an optional **1,672 MB** download;
-installing the app or Regular Clover does not download it. Download the companion resource
+Inpainting adds a separate Core ML U-Net because its input has nine channels,
+plus a VAE encoder. It is an optional **1,789 MB** download and requires the
+main Clover model first; Clover reuses the installed tokenizer, text encoder,
+and VAE decoder without downloading duplicate copies. Download the companion resource
 bundle from
 [`neonforestmist/Clover-Image-Tiny-Inpaint-CoreML`](https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML),
-or open the **Inpainting** tab and tap **Download 1,672 MB**. Clover fetches the
+or open the **Inpainting** tab and tap **Download 1,789 MB**. Clover fetches the
 repository manifest, verifies every resource by size and SHA-256, and stores
 the bundle at **On My iPhone → Clover → Models → Inpainting**. The
 runtime entry point is `CoreMLInpaintingService`:
 
-The v2 manifest is pinned to an immutable Hugging Face revision. Existing v1
-installations are detected by their missing/old revision marker and the app
-offers the v2 download instead of silently continuing to use stale weights.
+The v2 manifest is pinned to an immutable Hugging Face revision. A missing or
+outdated revision marker makes the app offer the current verified release
+instead of silently using stale weights.
 Generation defaults to DPM-Solver++, 20 steps, CFG 6.0, live previews every
 five steps, and a focused crop with a 96-pixel context margin. Final output is
 composited through the exact mask so unpainted pixels stay unchanged.
@@ -127,11 +128,12 @@ recommended and 50 is the on-device maximum. The bundle is converted
 for the SD 1.4-class 512×512 architecture on iOS 18; validate final latency
 and memory on a physical device rather than Simulator.
 
-The current Inpainting U-Net does not expose Clover's dynamic LoRA state.
-Regular Clover LoRA files target its 4-channel U-Net and are not interchangeable
-with this 9-channel model. An inpainting-specific LoRA can be fused before a
-separate Core ML conversion, but dynamic Inpainting LoRA selection is not
-included in this release.
+The current Inpainting U-Net exposes three mutable rank-16 style slots, just
+like Create. You can combine up to three installed or imported Clover LoRAs
+and tune each strength independently. The conversion maps Clover's source
+attention layers to channel-compatible attention layers in the larger
+9-channel inpainting U-Net; exact Core ML parity is validated for all three
+simultaneous styles before release.
 
 ## On-device behavior
 

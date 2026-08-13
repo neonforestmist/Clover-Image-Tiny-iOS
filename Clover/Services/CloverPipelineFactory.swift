@@ -73,9 +73,8 @@ enum CloverPipelineFactory {
         )
     }
 
-    /// Builds the standalone 9-channel inpainting pipeline. Current resources
-    /// expose the same stateful style slots as Create; older chunked downloads
-    /// remain usable without styles during migration.
+    /// Builds the standalone 9-channel inpainting pipeline with the same
+    /// stateful style slots as Create.
     static func makeInpainting(
         resourcesURL: URL,
         styleWeights: [LoRAAdapter.WeightedWeights] = [],
@@ -84,25 +83,12 @@ enum CloverPipelineFactory {
         let urls = StableDiffusionPipeline.ResourceURLs(
             resourcesAt: resourcesURL
         )
-        let hasFullUnet = FileManager.default.fileExists(
-            atPath: urls.unetURL.path
-        )
-        let hasChunkedUnet = FileManager.default.fileExists(
-            atPath: urls.unetChunk1URL.path
-        ) && FileManager.default.fileExists(
-            atPath: urls.unetChunk2URL.path
-        )
         let adapterSchemaURL = resourcesURL.appending(
             path: "adapter-schema.json"
         )
-        let hasAdapterSchema = FileManager.default.fileExists(
-            atPath: adapterSchemaURL.path
-        )
-        guard (hasFullUnet || hasChunkedUnet),
-              FileManager.default.fileExists(atPath: urls.encoderURL.path) else {
-            throw CloverPipelineError.incompatibleResources
-        }
-        if !styleWeights.isEmpty, (!hasFullUnet || !hasAdapterSchema) {
+        guard FileManager.default.fileExists(atPath: urls.unetURL.path),
+              FileManager.default.fileExists(atPath: urls.encoderURL.path),
+              FileManager.default.fileExists(atPath: adapterSchemaURL.path) else {
             throw CloverPipelineError.incompatibleResources
         }
 
@@ -115,31 +101,17 @@ enum CloverPipelineFactory {
             modelAt: urls.textEncoderURL,
             configuration: configuration
         )
-        let unet: Unet
-        if hasFullUnet, hasAdapterSchema {
-            let adapter = styleWeights.isEmpty
-                ? nil
-                : try LoRAAdapter(
-                    weightedWeights: styleWeights,
-                    schemaAt: adapterSchemaURL
-                )
-            unet = makeStatefulUnet(
-                modelURL: urls.unetURL,
-                adapter: adapter,
-                configuration: configuration
+        let adapter = styleWeights.isEmpty
+            ? nil
+            : try LoRAAdapter(
+                weightedWeights: styleWeights,
+                schemaAt: adapterSchemaURL
             )
-        } else if FileManager.default.fileExists(atPath: urls.unetChunk1URL.path),
-           FileManager.default.fileExists(atPath: urls.unetChunk2URL.path) {
-            unet = Unet(
-                chunksAt: [urls.unetChunk1URL, urls.unetChunk2URL],
-                configuration: configuration
-            )
-        } else {
-            unet = Unet(
-                modelAt: urls.unetURL,
-                configuration: configuration
-            )
-        }
+        let unet = makeStatefulUnet(
+            modelURL: urls.unetURL,
+            adapter: adapter,
+            configuration: configuration
+        )
         let decoder = Decoder(
             modelAt: urls.decoderURL,
             configuration: configuration
