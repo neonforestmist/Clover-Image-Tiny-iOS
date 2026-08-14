@@ -45,7 +45,7 @@ struct InpaintingModelManifest: Codable, Sendable {
         case resources
     }
 
-    static let repositoryRevision = "72622be6c2c7fd8cf3d2091a298d9c41a4bcde8c"
+    static let repositoryRevision = "23f9a3693f6c1c8b8b02681a07e84178403fd073"
     static let revisionMarkerName = ".clover-inpainting-revision"
 
     static let remoteURL = URL(

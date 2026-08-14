@@ -78,15 +78,18 @@ U-Net.
 ## Inpainting resources
 
 Inpainting adds a separate Core ML U-Net because its input has nine channels,
-plus a VAE encoder. It is an optional **1,789 MB** download and requires the
+plus a VAE encoder. It is an optional **931 MB** download and requires the
 main Clover model first; Clover reuses the installed tokenizer, text encoder,
 and VAE decoder without downloading duplicate copies. Download the companion resource
 bundle from
 [`neonforestmist/Clover-Image-Tiny-Inpaint-CoreML`](https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML),
-or open the **Inpainting** tab and tap **Download 1,789 MB**. Clover fetches the
+or open the **Inpainting** tab and tap **Download 931 MB**. Clover fetches the
 repository manifest, verifies every resource by size and SHA-256, and stores
 the bundle at **On My iPhone → Clover → Models → Inpainting**. The
 runtime entry point is `CoreMLInpaintingService`:
+
+The production U-Net uses per-channel symmetric int8 weight compression while
+keeping the three runtime LoRA state slots in FP16.
 
 The v2 manifest is pinned to an immutable Hugging Face revision. A missing or
 outdated revision marker makes the app offer the current verified release

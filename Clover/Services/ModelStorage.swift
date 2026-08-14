@@ -212,8 +212,46 @@ enum ModelStorage {
                 path: stored,
                 directoryHint: .isDirectory
             )
-            if isUsableResourcesDirectory(url) {
+            if isUsableInstallationDirectory(url, id: id) {
                 return url
+            }
+        }
+
+        // The visible model folder is the durable source of truth. Recover
+        // its lightweight UserDefaults pointer after an app restore, test
+        // reset, or preferences migration instead of asking the user to
+        // download gigabytes that are already present in Documents.
+        let installedRoot = rootURL
+            .appending(path: "Installed", directoryHint: .isDirectory)
+            .appending(path: id, directoryHint: .isDirectory)
+        if let candidates = try? FileManager.default.contentsOfDirectory(
+            at: installedRoot,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            let recovered = candidates.map { candidate in
+                let nested = candidate.appending(
+                    path: "Resources",
+                    directoryHint: .isDirectory
+                )
+                return isUsableInstallationDirectory(nested, id: id)
+                    ? nested
+                    : candidate
+            }
+            .filter { isUsableInstallationDirectory($0, id: id) }
+            .sorted(by: { left, right in
+                let leftDate = (try? left.resourceValues(
+                    forKeys: [.contentModificationDateKey]
+                ).contentModificationDate) ?? .distantPast
+                let rightDate = (try? right.resourceValues(
+                    forKeys: [.contentModificationDateKey]
+                ).contentModificationDate) ?? .distantPast
+                return leftDate > rightDate
+            })
+            .first
+            if let recovered {
+                recordInstallation(id: id, resourcesURL: recovered)
+                return recovered
             }
         }
 
@@ -281,6 +319,18 @@ enum ModelStorage {
             )
         }
         return hasRequiredResources
+    }
+
+    private static func isUsableInstallationDirectory(
+        _ url: URL,
+        id: String
+    ) -> Bool {
+        if id == "base" {
+            return isUsableResourcesDirectory(url)
+        }
+        return FileManager.default.fileExists(
+            atPath: url.appending(path: "Adapter.safetensors").path
+        )
     }
 
     static func isStatefulLoRAResourcesDirectory(_ url: URL) -> Bool {

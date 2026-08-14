@@ -3,6 +3,49 @@ import XCTest
 @testable import Clover
 
 final class InpaintingTests: XCTestCase {
+    func testInstalledHighQualityInpaintingWithThreeStylesOnPhysicalDevice() async throws {
+        guard ProcessInfo.processInfo.environment["CLOVER_DEVICE_MODEL_TEST"] == "1" else {
+            throw XCTSkip("Set CLOVER_DEVICE_MODEL_TEST=1 for the opt-in physical model test.")
+        }
+        XCTAssertTrue(ModelStorage.hasInpaintingResources)
+        XCTAssertTrue(InpaintingModelManifest.hasCurrentInstallation)
+
+        let source = try XCTUnwrap(
+            makeRGBAImage(width: 512, height: 512) { index in
+                let x = index % 512
+                let y = index / 512
+                return (
+                    UInt8(40 + (x * 120 / 511)),
+                    UInt8(70 + (y * 100 / 511)),
+                    110,
+                    255
+                )
+            }
+        )
+        let mask = try XCTUnwrap(makeMaskImage(width: 512, height: 512))
+        var settings = GenerationSettings.inpaintingDefaults
+        settings.prompt = "Monet, pointillism, watercolor anime, a red flower in a ceramic vase"
+        settings.negativePrompt = "blurry, distorted"
+        settings.stepCount = 4
+        settings.computeTarget = .neuralEngine
+        settings.livePreviewEnabled = false
+        settings.styleIDs = ["monet", "pointillism", "watercolor-anime"]
+        settings.setStyleStrength(0.7, for: "monet")
+        settings.setStyleStrength(0.45, for: "pointillism")
+        settings.setStyleStrength(1.1, for: "watercolor-anime")
+
+        let result = try await CoreMLInpaintingService().generate(
+            resourcesURL: ModelStorage.inpaintingResourcesURL,
+            request: InpaintingRequest(image: source, mask: mask),
+            settings: settings,
+            cancellation: GenerationCancellationToken(),
+            progress: { _ in }
+        )
+        let image = try XCTUnwrap(result.images.first?.cgImage)
+        XCTAssertEqual(image.width, 512)
+        XCTAssertEqual(image.height, 512)
+    }
+
     func testInpaintingSafetyCheckerIsDisabledByConstruction() {
         XCTAssertFalse(InpaintingRuntimePolicy.isSafetyCheckerEnabled)
     }

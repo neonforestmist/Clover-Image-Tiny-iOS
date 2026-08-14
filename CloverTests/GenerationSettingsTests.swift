@@ -59,6 +59,38 @@ final class GenerationSettingsTests: XCTestCase {
         )
     }
 
+    func testStyleInstallationRecoversAfterPreferencesAreCleared() throws {
+        let id = "recovery-style-test"
+        let installedRoot = ModelStorage.rootURL
+            .appending(path: "Installed", directoryHint: .isDirectory)
+            .appending(path: id, directoryHint: .isDirectory)
+        let resourcesURL = installedRoot
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(
+            at: resourcesURL,
+            withIntermediateDirectories: true
+        )
+        try Data([0x43, 0x4c, 0x4f, 0x56, 0x45, 0x52]).write(
+            to: resourcesURL.appending(path: "Adapter.safetensors")
+        )
+        defer {
+            ModelStorage.clearInstallation(id: id)
+            try? FileManager.default.removeItem(at: installedRoot)
+        }
+
+        ModelStorage.clearInstallation(id: id)
+        XCTAssertEqual(
+            ModelStorage.resourcesURL(for: id)?.standardizedFileURL,
+            resourcesURL.standardizedFileURL
+        )
+        XCTAssertEqual(
+            UserDefaults.standard.string(
+                forKey: "clover-model-install-\(id)"
+            ),
+            "Installed/\(id)/\(resourcesURL.lastPathComponent)"
+        )
+    }
+
     func testInstalledResourcesMustMatchTheSharedModelRevision() throws {
         let resourcesURL = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
