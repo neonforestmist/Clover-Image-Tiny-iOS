@@ -110,7 +110,8 @@ enum CloverPipelineFactory {
         let unet = makeStatefulUnet(
             modelURL: urls.unetURL,
             adapter: adapter,
-            configuration: configuration
+            configuration: configuration,
+            useLowMemoryBackend: true
         )
         let decoder = Decoder(
             modelAt: urls.decoderURL,
@@ -167,7 +168,8 @@ enum CloverPipelineFactory {
     private static func makeStatefulUnet(
         modelURL: URL,
         adapter: LoRAAdapter?,
-        configuration: MLModelConfiguration
+        configuration: MLModelConfiguration,
+        useLowMemoryBackend: Bool = false
     ) -> Unet {
         let unetConfiguration = configuration.copy()
             as! MLModelConfiguration
@@ -176,12 +178,20 @@ enum CloverPipelineFactory {
         unetConfiguration.computeUnits = .cpuOnly
         fallbackComputeUnits = nil
         #else
-        // Clover's mutable LoRA state is not supported by the Neural Engine
-        // execution planner. The GPU backend supports the stateful U-Net;
-        // CPU remains a safe fallback if a device cannot build the GPU plan.
-        // The remaining models continue to use the selected compute target.
-        unetConfiguration.computeUnits = .cpuAndGPU
-        fallbackComputeUnits = .cpuOnly
+        if useLowMemoryBackend {
+            // The 9-channel inpainting U-Net has a substantially larger peak
+            // working set than Create. Keeping it on CPU avoids iOS killing
+            // the process while Core ML builds or executes the GPU plan.
+            // Text encoding and VAE work still use the selected compute target.
+            unetConfiguration.computeUnits = .cpuOnly
+            fallbackComputeUnits = nil
+        } else {
+            // Clover's mutable LoRA state is not supported by the Neural Engine
+            // execution planner. The GPU backend supports the stateful U-Net;
+            // CPU remains a safe fallback if a device cannot build the GPU plan.
+            unetConfiguration.computeUnits = .cpuAndGPU
+            fallbackComputeUnits = .cpuOnly
+        }
         #endif
         return Unet(
             modelAt: modelURL,

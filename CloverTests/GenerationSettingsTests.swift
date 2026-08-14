@@ -91,6 +91,30 @@ final class GenerationSettingsTests: XCTestCase {
         )
     }
 
+    func testStyleWeightsRecoverFromDurableVariantPayload() throws {
+        let id = "recovery-style-\(UUID().uuidString)"
+        let variantRoot = ModelStorage.rootURL
+            .appending(path: "Variants", directoryHint: .isDirectory)
+            .appending(path: id, directoryHint: .isDirectory)
+        let revision = variantRoot.appending(
+            path: "revision-a",
+            directoryHint: .isDirectory
+        )
+        let weights = revision.appending(path: "Adapter.safetensors")
+        try FileManager.default.createDirectory(
+            at: revision,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: variantRoot) }
+        try Data([0x43, 0x4C, 0x4F, 0x56, 0x45, 0x52, 0x01, 0x00, 0x01])
+            .write(to: weights)
+
+        XCTAssertEqual(
+            ModelStorage.styleWeightsURL(for: id)?.standardizedFileURL,
+            weights.standardizedFileURL
+        )
+    }
+
     func testInstalledResourcesMustMatchTheSharedModelRevision() throws {
         let resourcesURL = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)

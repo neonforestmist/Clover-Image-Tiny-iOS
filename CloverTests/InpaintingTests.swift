@@ -1,4 +1,6 @@
 import CoreGraphics
+import CryptoKit
+import Foundation
 import XCTest
 @testable import Clover
 
@@ -9,6 +11,11 @@ final class InpaintingTests: XCTestCase {
         }
         XCTAssertTrue(ModelStorage.hasInpaintingResources)
         XCTAssertTrue(InpaintingModelManifest.hasCurrentInstallation)
+        try await ensureStylesAvailable([
+            "monet",
+            "pointillism",
+            "watercolor-anime",
+        ])
 
         let source = try XCTUnwrap(
             makeRGBAImage(width: 512, height: 512) { index in
@@ -44,6 +51,58 @@ final class InpaintingTests: XCTestCase {
         let image = try XCTUnwrap(result.images.first?.cgImage)
         XCTAssertEqual(image.width, 512)
         XCTAssertEqual(image.height, 512)
+    }
+
+    private func ensureStylesAvailable(_ ids: [String]) async throws {
+        let missing = ids.filter {
+            ModelStorage.styleWeightsURL(for: $0) == nil
+        }
+        guard !missing.isEmpty else { return }
+
+        let (data, response) = try await URLSession.shared.data(
+            from: ModelCatalog.remoteURL
+        )
+        let httpResponse = try XCTUnwrap(response as? HTTPURLResponse)
+        XCTAssertTrue(200..<300 ~= httpResponse.statusCode)
+        let catalog = try JSONDecoder().decode(ModelCatalog.self, from: data)
+        for id in missing {
+            let variant = try XCTUnwrap(catalog.variant(id: id))
+            let file = try XCTUnwrap(variant.files.first(where: {
+                $0.path.hasSuffix(".safetensors")
+            }))
+            let (weights, weightsResponse) = try await URLSession.shared.data(
+                from: catalog.downloadURL(
+                    for: file,
+                    revision: variant.revision,
+                    repository: variant.repository
+                )
+            )
+            let httpResponse = try XCTUnwrap(
+                weightsResponse as? HTTPURLResponse
+            )
+            XCTAssertTrue(200..<300 ~= httpResponse.statusCode)
+            XCTAssertEqual(Int64(weights.count), file.size)
+            XCTAssertEqual(
+                SHA256.hash(data: weights).map {
+                    String(format: "%02x", $0)
+                }.joined(),
+                file.sha256
+            )
+            let destination = ModelStorage.rootURL
+                .appending(path: "Variants", directoryHint: .isDirectory)
+                .appending(path: id, directoryHint: .isDirectory)
+                .appending(
+                    path: variant.revision,
+                    directoryHint: .isDirectory
+                )
+                .appending(path: file.path)
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try weights.write(to: destination, options: .atomic)
+            XCTAssertNotNil(ModelStorage.styleWeightsURL(for: id))
+        }
     }
 
     func testInpaintingSafetyCheckerIsDisabledByConstruction() {

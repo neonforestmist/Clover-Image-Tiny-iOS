@@ -274,14 +274,47 @@ enum ModelStorage {
         if let imported = importedWeightsURL(for: id) {
             return imported
         }
-        guard id != "base", let resources = resourcesURL(for: id) else {
+        guard id != "base" else {
             return nil
         }
-        let weights = resources.appending(path: "Adapter.safetensors")
-        guard FileManager.default.fileExists(atPath: weights.path) else {
+
+        if let resources = resourcesURL(for: id) {
+            let weights = resources.appending(path: "Adapter.safetensors")
+            if FileManager.default.fileExists(atPath: weights.path) {
+                return weights
+            }
+        }
+
+        // Variant payloads are the durable source of truth; Installed only
+        // contains lightweight links. Recover directly from a downloaded
+        // adapter after an Xcode reinstall, app-container migration, or lost
+        // UserDefaults pointer so generation never asks for a second download.
+        let variantRoot = rootURL
+            .appending(path: "Variants", directoryHint: .isDirectory)
+            .appending(path: id, directoryHint: .isDirectory)
+        guard let revisions = try? FileManager.default.contentsOfDirectory(
+            at: variantRoot,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
             return nil
         }
-        return weights
+        return revisions.compactMap { revision -> URL? in
+            let weights = revision.appending(path: "Adapter.safetensors")
+            return FileManager.default.fileExists(atPath: weights.path)
+                ? weights
+                : nil
+        }
+        .sorted { left, right in
+            let leftDate = (try? left.resourceValues(
+                forKeys: [.contentModificationDateKey]
+            ).contentModificationDate) ?? .distantPast
+            let rightDate = (try? right.resourceValues(
+                forKeys: [.contentModificationDateKey]
+            ).contentModificationDate) ?? .distantPast
+            return leftDate > rightDate
+        }
+        .first
     }
 
     static func recordInstallation(id: String, resourcesURL: URL) {
