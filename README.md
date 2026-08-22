@@ -27,6 +27,11 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 - Local artwork library and Photos export
 - Dedicated **Inpainting** tab between Create and Library for image selection,
   mask painting, and local edits
+- Canvas-first **Create** surface with a floating prompt deck and quick chips
+- iPhone uses a slide-over sidebar (not a bottom tab bar); iPad uses a split-view sidebar
+- First-class **Models** and **Settings**, plus an iPad inspector for parameters
+- Storage and thermal advisories before large downloads and while generating
+- CreativeML Open RAIL-M model license shown at the bottom of Models
 - Base-first downloads: install Clover, then add only the styles you want
 - Mix up to three downloaded or imported LoRAs with independent strengths
 - Import a Clover-compatible `.safetensors` style from **On My iPhone → Clover → Imported Styles**
@@ -43,6 +48,17 @@ Output resolution is fixed at 512 × 512 by the converted Core ML models.
 - Enough free storage for the selected Core ML model
 
 The repository and app bundle do not contain the model weights.
+
+### Download sizes
+
+| Component | Download | Required for |
+|---|---:|---|
+| Clover runtime | 994.9 MB | Create and shared text/VAE resources |
+| Inpainting add-on | 1.79 GB | Nine-channel masked image editing |
+| Each bundled LoRA | 6.9 MB | Optional Create styles |
+
+The Inpainting add-on requires Clover because it reuses Clover's tokenizer,
+text encoder, and VAE decoder. Create LoRAs are not loaded by Inpainting.
 
 ## Run the app
 
@@ -62,7 +78,9 @@ Downloaded files are visible in the Files app under
 migrated into that folder when possible.
 
 Clover installs first: its shared components (text encoder, VAE decoder,
-tokenizer) plus one stateful base U-Net, about 1.5 GB total. Monet,
+tokenizer) plus one stateful base U-Net, about 994.9 MB total. The historical
+~1.6 GB repository size also counted a separate ~608 MB safety-checker model
+that this runtime does not load or download. Monet,
 Pointillism, and Watercolor Anime are then **optional 6,927,128-byte LoRA
 style downloads**: `Monet.safetensors`, `Pointillism.safetensors`, and
 `Watercolor-Anime.safetensors`. The Swift pipeline converts up to three selected
@@ -78,25 +96,36 @@ U-Net.
 ## Inpainting resources
 
 Inpainting adds a separate Core ML U-Net because its input has nine channels,
-plus a VAE encoder. It is an optional **931 MB** download and requires the
+plus a VAE encoder. It is an optional **1.79 GB** download and requires the
 main Clover model first; Clover reuses the installed tokenizer, text encoder,
 and VAE decoder without downloading duplicate copies. Download the companion resource
 bundle from
 [`neonforestmist/Clover-Image-Tiny-Inpaint-CoreML`](https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML),
-or open the **Inpainting** tab and tap **Download 931 MB**. Clover fetches the
+or open the **Inpainting** tab and tap **Download 1.79 GB**. Clover fetches the
 repository manifest, verifies every resource by size and SHA-256, and stores
 the bundle at **On My iPhone → Clover → Models → Inpainting**. The
 runtime entry point is `CoreMLInpaintingService`:
 
-The production U-Net uses per-channel symmetric int8 weight compression while
-keeping the three runtime LoRA state slots in FP16.
+The production U-Net is a two-stage FP16 Core ML pipeline. Core ML owns the
+stage handoff so iPhone can release intermediate tensors promptly instead of
+keeping the complete U-Net execution graph resident at once.
 
-The v2 manifest is pinned to an immutable Hugging Face revision. A missing or
+The v3 manifest is pinned to an immutable Hugging Face revision. A missing or
 outdated revision marker makes the app offer the current verified release
 instead of silently using stale weights.
 Generation defaults to DPM-Solver++, 20 steps, CFG 6.0, live previews every
-five steps, and a focused crop with a 96-pixel context margin. Final output is
-composited through the exact mask so unpainted pixels stay unchanged.
+five steps, and Torch-compatible sampling. Small masks are run as a focused
+512 × 512 crop with 96 pixels of surrounding source context—matching the
+Diffusers demo—so the model has enough latent resolution to replace the
+selected object rather than recreate its background. Final output replaces
+every pixel inside the user's mask with the generated result while leaving
+unpainted pixels unchanged.
+The selected region is set to neutral gray before the Core ML VAE encoder so
+it becomes zero in the normalized `[-1, 1]` tensor, matching the exact masked
+image contract used by the Diffusers pipeline.
+The Core ML U-Net is converted from the same 9-channel inpainting checkpoint
+as the regular Diffusers release; Core ML changes the execution format, not
+the trained inpainting weights.
 Live Step Previews and their interval can be changed in Inpainting Settings;
 turning them off skips latent preview rendering and does not store timeline
 frames, reducing generation overhead and storage use.
@@ -131,12 +160,22 @@ recommended and 50 is the on-device maximum. The bundle is converted
 for the SD 1.4-class 512×512 architecture on iOS 18; validate final latency
 and memory on a physical device rather than Simulator.
 
-The current Inpainting U-Net exposes three mutable rank-16 style slots, just
-like Create. You can combine up to three installed or imported Clover LoRAs
-and tune each strength independently. The conversion maps Clover's source
-attention layers to channel-compatible attention layers in the larger
-9-channel inpainting U-Net; exact Core ML parity is validated for all three
-simultaneous styles before release.
+Create LoRAs are not applied during Inpainting. They target Clover's regular
+four-channel U-Net, while Inpainting uses the separate stateless nine-channel
+checkpoint. An inpainting-specific LoRA must be fused before Core ML
+conversion to be compatible with this pipeline.
+
+### Verified on iPhone
+
+The schema-v3 inpainting bundle was validated end to end on an iPhone 15
+running iOS 26.6. A 30-step physical-device smoke test downloaded and verified
+the release, loaded the two-stage FP16 U-Net, generated the masked edit, and
+preserved the unpainted source pixels. The same build passes 69 Simulator
+tests; the physical Core ML test is skipped on Simulator by design.
+
+The observed physical XCTest/debug run took about 73 seconds. This is a smoke
+test result rather than a performance guarantee: first-run Core ML compilation,
+temperature, available memory, and device generation affect latency.
 
 ## On-device behavior
 
@@ -156,7 +195,7 @@ detail screen can also download the complete timeline as a ZIP containing each
 saved preview and the full-resolution final step. More frequent previews still
 increase generation time, storage use, and battery use.
 
-The stateful U-Net uses a batch-one input and runs classifier-free guidance in
+Create's stateful U-Net uses a batch-one input and runs classifier-free guidance in
 two serial passes, cutting the largest activation peak roughly in half. It runs
 with CPU and GPU compute because its mutable style buffers are not
 execution-planned reliably on the Neural Engine. Other pipeline components
@@ -164,7 +203,7 @@ still honor the selected compute preference. Validate real generation on an
 iPhone or iPad; the Simulator is suitable for UI testing. The first generation
 may take longer while Core ML compiles and caches its graphs.
 
-The current Core ML U-Net exposes three rank-16 blocks inside each mutable LoRA
+The Create Core ML U-Net exposes three rank-16 blocks inside each mutable LoRA
 state. Clover concatenates the down matrices and weighted up matrices, which
 produces the exact sum of up to three independently selected styles without
 cross terms. Empty blocks stay zero, so the same U-Net also runs base Clover.
@@ -200,9 +239,8 @@ bottom status now reports **Decoding final image**, **Checking final image**,
 **Applying the exact mask** (Inpainting), and **Saving to Library** instead of
 showing 100% while Core ML and local persistence are still working.
 
-If an inpainting seed produces a collapsed black/invalid edit, Clover retries
-up to two more times with deterministic follow-up seeds. The seed that actually
-succeeds is shown in the editor and saved with the finished Library artwork.
+Inpainting performs one deterministic render for the requested seed. It does
+not silently replace the seed or run a custom salvage pass.
 
 ## Regenerate the Xcode project
 
