@@ -47,11 +47,11 @@ Output resolution is fixed at 512 × 512 by the converted Core ML models.
 
 <table>
 <tr>
-<td align="center" width="20%"><img src="Screenshots/create-output.png" width="180" alt="Create screen with a generated image, step timeline, and Monet style prompt chip"><br><sub>Create output</sub></td>
-<td align="center" width="20%"><img src="Screenshots/create-controls.png" width="180" alt="Create controls with prompt and negative-prompt fields"><br><sub>Create controls</sub></td>
-<td align="center" width="20%"><img src="Screenshots/models-and-styles.png" width="180" alt="Models screen with Clover, Inpainting U-Net, and LoRA Styles"><br><sub>Models &amp; LoRA styles</sub></td>
-<td align="center" width="20%"><img src="Screenshots/inpainting.png" width="180" alt="Inpainting editor with Paint and Erase tools, brush size, and edit prompt"><br><sub>Inpainting editor</sub></td>
-<td align="center" width="20%"><img src="Screenshots/library-detail.png" width="180" alt="Library artwork detail with step scrubbing, sharing, saving, ZIP export, and Load Settings into Studio"><br><sub>Library detail</sub></td>
+<td align="center" width="20%"><img src="Screenshots/create-output.png" width="100%" alt="Create screen with a generated image, step timeline, and Monet style prompt chip"><br><sub>Create output</sub></td>
+<td align="center" width="20%"><img src="Screenshots/create-controls.png" width="100%" alt="Create controls with prompt and negative-prompt fields"><br><sub>Create controls</sub></td>
+<td align="center" width="20%"><img src="Screenshots/models-and-styles.png" width="100%" alt="Models screen with Clover, Inpainting U-Net, and LoRA Styles"><br><sub>Models &amp; LoRA styles</sub></td>
+<td align="center" width="20%"><img src="Screenshots/inpainting.png" width="100%" alt="Inpainting editor with Paint and Erase tools, brush size, and edit prompt"><br><sub>Inpainting editor</sub></td>
+<td align="center" width="20%"><img src="Screenshots/library-detail.png" width="100%" alt="Library artwork detail with step scrubbing, sharing, saving, ZIP export, and Load Settings into Studio"><br><sub>Library detail</sub></td>
 </tr>
 </table>
 
