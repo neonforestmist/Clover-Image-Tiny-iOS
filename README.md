@@ -60,6 +60,23 @@ styles in Create, download the base and optional LoRAs in Models, edit a
 selected mask in Inpainting, and revisit saved outputs—including their step
 timelines—from Library.
 
+## Core ML model releases
+
+The app downloads verified Core ML resources from Hugging Face. The [base
+Clover Image Tiny Core ML release](https://huggingface.co/neonforestmist/Clover-Image-Tiny-CoreML)
+provides the shared runtime, and the optional [Inpainting Core ML
+release](https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML)
+provides the nine-channel masked-editing U-Net. The compact style downloads
+are published separately so each style can be installed only when needed:
+
+<table>
+<tr>
+<td align="center" width="33%"><a href="https://huggingface.co/neonforestmist/clover-image-tiny-monet-lora-coreml"><img src="Screenshots/coreml-monet.png" width="220" alt="Monet style preview"><br><strong>Monet</strong></a><br><sub>Impressionist color and brushwork<br>Core ML LoRA release</sub></td>
+<td align="center" width="33%"><a href="https://huggingface.co/neonforestmist/clover-image-tiny-pointillism-lora-coreml"><img src="Screenshots/coreml-pointillism.png" width="220" alt="Pointillism style preview"><br><strong>Pointillism</strong></a><br><sub>Dense paint dots and optical color<br>Core ML LoRA release</sub></td>
+<td align="center" width="33%"><a href="https://huggingface.co/neonforestmist/clover-image-tiny-watercolor-anime-lora-coreml"><img src="Screenshots/coreml-watercolor-anime.png" width="220" alt="Watercolor Anime style preview"><br><strong>Watercolor Anime</strong></a><br><sub>Storybook watercolor and anime detail<br>Core ML LoRA release</sub></td>
+</tr>
+</table>
+
 ## Set up from GitHub
 
 Clone the repository, then open the checked-in Xcode project:
