@@ -5,10 +5,23 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 
 ## Screenshots
 
-| Create | Models & Styles | Library |
-|:---:|:---:|:---:|
-| ![Create screen with a generated image](Screenshots/create-output.png) | ![Model picker: Clover downloadable, styles locked until it is installed](Screenshots/models.png) | ![Library grid of generated images](Screenshots/library.png) |
-| On-device generation | Base first, styles opt-in | Saved artwork |
+### Create
+
+![Create screen with a generated image, step timeline, and Monet style prompt chip](Screenshots/create-output.png)
+
+![Create controls with prompt and negative-prompt fields](Screenshots/create-controls.png)
+
+### Models and styles
+
+![Models screen with Clover, Inpainting U-Net, and LoRA Styles](Screenshots/models-and-styles.png)
+
+### Inpainting
+
+![Inpainting editor with Paint and Erase tools, brush size, and edit prompt](Screenshots/inpainting.png)
+
+### Library
+
+![Library artwork detail with step scrubbing, sharing, saving, ZIP export, and Load Settings into Studio](Screenshots/library-detail.png)
 
 ## Features
 
