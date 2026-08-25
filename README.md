@@ -66,8 +66,9 @@ The app downloads verified Core ML resources from Hugging Face. The [base
 Clover Image Tiny Core ML release](https://huggingface.co/neonforestmist/Clover-Image-Tiny-CoreML)
 provides the shared runtime, and the optional [Inpainting Core ML
 release](https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML)
-provides the nine-channel masked-editing U-Net. The compact style downloads
-are published separately so each style can be installed only when needed:
+provides the nine-channel masked-editing U-Net. 
+
+The compact LoRA style downloads are published separately so each style can be installed only if desired:
 
 <table>
 <tr>
