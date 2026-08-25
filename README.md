@@ -3,29 +3,6 @@
 Native, private image generation on iPhone with SwiftUI, Core ML, and
 [Clover Image Tiny](https://huggingface.co/neonforestmist/Clover-Image-Tiny).
 
-## Screenshots
-
-### Create
-
-<table>
-<tr>
-<td align="center"><img src="Screenshots/create-output.png" width="220" alt="Create screen with a generated image, step timeline, and Monet style prompt chip"><br><sub>Generated image and saved-step timeline</sub></td>
-<td align="center"><img src="Screenshots/create-controls.png" width="220" alt="Create controls with prompt and negative-prompt fields"><br><sub>Prompt and negative-prompt controls</sub></td>
-</tr>
-</table>
-
-### Models and styles
-
-<p align="center"><img src="Screenshots/models-and-styles.png" width="220" alt="Models screen with Clover, Inpainting U-Net, and LoRA Styles"></p>
-
-### Inpainting
-
-<p align="center"><img src="Screenshots/inpainting.png" width="220" alt="Inpainting editor with Paint and Erase tools, brush size, and edit prompt"></p>
-
-### Library
-
-<p align="center"><img src="Screenshots/library-detail.png" width="220" alt="Library artwork detail with step scrubbing, sharing, saving, ZIP export, and Load Settings into Studio"></p>
-
 ## Features
 
 ### Create
@@ -65,6 +42,23 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 - CreativeML Open RAIL-M model license shown at the bottom of Models
 
 Output resolution is fixed at 512 × 512 by the converted Core ML models.
+
+## Screenshots
+
+<table>
+<tr>
+<td align="center" width="20%"><img src="Screenshots/create-output.png" width="180" alt="Create screen with a generated image, step timeline, and Monet style prompt chip"><br><sub>Create output</sub></td>
+<td align="center" width="20%"><img src="Screenshots/create-controls.png" width="180" alt="Create controls with prompt and negative-prompt fields"><br><sub>Create controls</sub></td>
+<td align="center" width="20%"><img src="Screenshots/models-and-styles.png" width="180" alt="Models screen with Clover, Inpainting U-Net, and LoRA Styles"><br><sub>Models &amp; LoRA styles</sub></td>
+<td align="center" width="20%"><img src="Screenshots/inpainting.png" width="180" alt="Inpainting editor with Paint and Erase tools, brush size, and edit prompt"><br><sub>Inpainting editor</sub></td>
+<td align="center" width="20%"><img src="Screenshots/library-detail.png" width="180" alt="Library artwork detail with step scrubbing, sharing, saving, ZIP export, and Load Settings into Studio"><br><sub>Library detail</sub></td>
+</tr>
+</table>
+
+The screenshots show the primary on-device workflow: tune a prompt and
+styles in Create, download the base and optional LoRAs in Models, edit a
+selected mask in Inpainting, and revisit saved outputs—including their step
+timelines—from Library.
 
 ## Set up from GitHub
 
