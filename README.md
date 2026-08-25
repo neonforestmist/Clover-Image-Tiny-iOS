@@ -7,21 +7,24 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 
 ### Create
 
-![Create screen with a generated image, step timeline, and Monet style prompt chip](Screenshots/create-output.png)
-
-![Create controls with prompt and negative-prompt fields](Screenshots/create-controls.png)
+<table>
+<tr>
+<td align="center"><img src="Screenshots/create-output.png" width="220" alt="Create screen with a generated image, step timeline, and Monet style prompt chip"><br><sub>Generated image and saved-step timeline</sub></td>
+<td align="center"><img src="Screenshots/create-controls.png" width="220" alt="Create controls with prompt and negative-prompt fields"><br><sub>Prompt and negative-prompt controls</sub></td>
+</tr>
+</table>
 
 ### Models and styles
 
-![Models screen with Clover, Inpainting U-Net, and LoRA Styles](Screenshots/models-and-styles.png)
+<p align="center"><img src="Screenshots/models-and-styles.png" width="220" alt="Models screen with Clover, Inpainting U-Net, and LoRA Styles"></p>
 
 ### Inpainting
 
-![Inpainting editor with Paint and Erase tools, brush size, and edit prompt](Screenshots/inpainting.png)
+<p align="center"><img src="Screenshots/inpainting.png" width="220" alt="Inpainting editor with Paint and Erase tools, brush size, and edit prompt"></p>
 
 ### Library
 
-![Library artwork detail with step scrubbing, sharing, saving, ZIP export, and Load Settings into Studio](Screenshots/library-detail.png)
+<p align="center"><img src="Screenshots/library-detail.png" width="220" alt="Library artwork detail with step scrubbing, sharing, saving, ZIP export, and Load Settings into Studio"></p>
 
 ## Features
 
@@ -75,6 +78,11 @@ open Clover.xcodeproj
 
 The repository and app bundle do not contain model weights. Download the
 models from the **Models** screen after installing the app.
+
+This repository contains the complete app source, checked-in Xcode project,
+XcodeGen specification, vendored Core ML runtime, unit tests, UI tests, and
+supporting assets. Build products, signing credentials, local configuration,
+and model weights are intentionally excluded by `.gitignore`.
 
 ### Regenerate the Xcode project
 
