@@ -37,7 +37,9 @@ final class ArtworkLibrary {
     func add(
         images: [GeneratedImage],
         previewFrames: [GeneratedPreviewFrame] = [],
-        settings: GenerationSettings
+        settings: GenerationSettings,
+        inpaintingSource: CGImage? = nil,
+        inpaintingMask: CGImage? = nil
     ) throws -> [Artwork] {
         var additions: [Artwork] = []
 
@@ -68,6 +70,12 @@ final class ArtworkLibrary {
                     artworkID: id,
                     artifactDirectory: artifactDirectory
                 )
+                let inpaintingFiles = try persistInpaintingInputs(
+                    source: inpaintingSource,
+                    mask: inpaintingMask,
+                    artworkID: id,
+                    artifactDirectory: artifactDirectory
+                )
 
                 additions.append(
                     Artwork(
@@ -78,7 +86,9 @@ final class ArtworkLibrary {
                         generation: GenerationSnapshot(
                             settings: settings,
                             imageIndex: generated.imageIndex
-                        )
+                        ),
+                        inpaintingSourceFilename: inpaintingFiles?.source,
+                        inpaintingMaskFilename: inpaintingFiles?.mask
                     )
                 )
             } catch {
@@ -117,6 +127,20 @@ final class ArtworkLibrary {
 
     func image(for artwork: Artwork) -> UIImage? {
         UIImage(contentsOfFile: imageURL(for: artwork).path)
+    }
+
+    func inpaintingInput(for artwork: Artwork) -> InpaintingStudioInput? {
+        guard let sourceFilename = artwork.inpaintingSourceFilename,
+              let maskFilename = artwork.inpaintingMaskFilename,
+              let source = UIImage(
+                  contentsOfFile: directoryURL.appending(path: sourceFilename).path
+              )?.cgImage,
+              let mask = UIImage(
+                  contentsOfFile: directoryURL.appending(path: maskFilename).path
+              )?.cgImage else {
+            return nil
+        }
+        return InpaintingStudioInput(sourceImage: source, maskImage: mask)
     }
 
     func previewFrames(for artwork: Artwork) -> [ArtworkPreviewFrame] {
@@ -242,6 +266,31 @@ final class ArtworkLibrary {
         }
     }
 
+    private func persistInpaintingInputs(
+        source: CGImage?,
+        mask: CGImage?,
+        artworkID: UUID,
+        artifactDirectory: URL
+    ) throws -> (source: String, mask: String)? {
+        guard let source, let mask,
+              let sourceData = UIImage(cgImage: source).pngData(),
+              let maskData = UIImage(cgImage: mask).pngData() else {
+            return nil
+        }
+
+        let sourceFilename = "\(artworkID.uuidString)/inpainting-source.png"
+        let maskFilename = "\(artworkID.uuidString)/inpainting-mask.png"
+        try sourceData.write(
+            to: artifactDirectory.appending(path: "inpainting-source.png"),
+            options: .atomic
+        )
+        try maskData.write(
+            to: artifactDirectory.appending(path: "inpainting-mask.png"),
+            options: .atomic
+        )
+        return (sourceFilename, maskFilename)
+    }
+
     private func restore() {
         guard
             let data = try? Data(contentsOf: indexURL),
@@ -260,6 +309,11 @@ final class ArtworkLibrary {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(artworks).write(to: indexURL, options: .atomic)
     }
+}
+
+struct InpaintingStudioInput: @unchecked Sendable {
+    let sourceImage: CGImage
+    let maskImage: CGImage
 }
 
 enum StoredZIPArchive {

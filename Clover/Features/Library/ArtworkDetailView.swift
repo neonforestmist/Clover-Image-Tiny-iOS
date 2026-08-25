@@ -105,9 +105,7 @@ struct ArtworkDetailView: View {
             .accessibilityIdentifier("download-steps-zip")
 
             Button {
-                var settings = GenerationSettings()
-                settings.adopt(artwork.generation)
-                route.openCreate(with: settings)
+                loadIntoStudio()
             } label: {
                 Label("Load Settings into Studio", systemImage: "slider.horizontal.3")
                     .frame(maxWidth: .infinity)
@@ -151,6 +149,22 @@ struct ArtworkDetailView: View {
             Color(.secondarySystemBackground),
             in: .rect(cornerRadius: 16)
         )
+    }
+
+    private func loadIntoStudio() {
+        if let input = library.inpaintingInput(for: artwork) {
+            var settings = GenerationSettings.inpaintingDefaults
+            settings.adopt(artwork.generation)
+            route.openInpainting(
+                with: settings,
+                sourceImage: input.sourceImage,
+                maskImage: input.maskImage
+            )
+        } else {
+            var settings = GenerationSettings()
+            settings.adopt(artwork.generation)
+            route.openCreate(with: settings)
+        }
     }
 
     private func saveToPhotoLibrary() {

@@ -10,6 +10,7 @@ struct InpaintingView: View {
 
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var sourceImage: CGImage?
+    @State private var baseMask: CGImage?
     @State private var strokes: [MaskStroke] = []
     @State private var redoStrokes: [MaskStroke] = []
     @State private var maskTool: MaskTool = .paint
@@ -100,6 +101,9 @@ struct InpaintingView: View {
             .task(id: selectedPhoto) {
                 await loadSelectedPhoto()
             }
+            .task(id: route.pendingInpaintingSession?.id) {
+                restorePendingInpaintingSession()
+            }
             .onDisappear {
                 selectedPhoto = nil
                 presentedSheet = nil
@@ -148,6 +152,7 @@ struct InpaintingView: View {
             } else if let sourceImage {
                 MaskEditor(
                     image: sourceImage,
+                    baseMask: baseMask,
                     strokes: $strokes,
                     tool: maskTool,
                     brushSize: brushSize
@@ -270,6 +275,7 @@ struct InpaintingView: View {
                 replacePhotoPicker
 
                 Button(role: .destructive) {
+                    baseMask = nil
                     strokes.removeAll()
                     redoStrokes.removeAll()
                 } label: {
@@ -277,7 +283,7 @@ struct InpaintingView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .disabled(strokes.isEmpty || isWorking)
+                .disabled((baseMask == nil && strokes.isEmpty) || isWorking)
                 .accessibilityIdentifier("inpainting-mask-clear")
             }
         }
@@ -416,7 +422,7 @@ struct InpaintingView: View {
 
     private var canGenerate: Bool {
         sourceImage != nil
-            && !strokes.isEmpty
+            && (baseMask != nil || !strokes.isEmpty)
             && !settings.trimmedPrompt.isEmpty
             && modelManager.isInstalled
             && settings.styleIDs.allSatisfy(styleManager.isInstalled)
@@ -457,10 +463,24 @@ struct InpaintingView: View {
 
     private func applySourceImage(_ image: CGImage) {
         sourceImage = image
+        baseMask = nil
         preview = nil
         strokes.removeAll()
         redoStrokes.removeAll()
         maskTool = .paint
+    }
+
+    private func restorePendingInpaintingSession() {
+        guard let session = route.pendingInpaintingSession else { return }
+        settings = session.settings
+        sourceImage = session.sourceImage
+        baseMask = session.maskImage
+        selectedPhoto = nil
+        preview = nil
+        strokes.removeAll()
+        redoStrokes.removeAll()
+        maskTool = .paint
+        route.pendingInpaintingSession = nil
     }
 
     private func undoMaskStroke() {
@@ -479,6 +499,7 @@ struct InpaintingView: View {
         }
         guard let mask = MaskRenderer.makeMask(
             image: originalImage,
+            baseMask: baseMask,
             strokes: strokes
         ) else {
             errorMessage = "Paint at least one area for Clover to replace. A fully erased mask has nothing to edit."
@@ -528,6 +549,7 @@ struct InpaintingView: View {
                     throw GenerationError.cancelled
                 }
                 sourceImage = image.cgImage
+                baseMask = nil
                 strokes.removeAll()
                 redoStrokes.removeAll()
                 preview = nil
@@ -541,7 +563,9 @@ struct InpaintingView: View {
                 _ = try library.add(
                     images: result.images,
                     previewFrames: result.previewFrames,
-                    settings: persistedSettings
+                    settings: persistedSettings,
+                    inpaintingSource: originalImage,
+                    inpaintingMask: mask
                 )
             } catch GenerationError.cancelled {
                 // Cancellation is an expected interaction.
@@ -608,6 +632,7 @@ private struct MaskStroke: Sendable {
 
 private struct MaskEditor: View {
     let image: CGImage
+    let baseMask: CGImage?
     @Binding var strokes: [MaskStroke]
     let tool: MaskTool
     let brushSize: Double
@@ -628,6 +653,13 @@ private struct MaskEditor: View {
                     .scaledToFit()
 
                 Canvas { context, _ in
+                    if let baseMask,
+                       let overlay = MaskRenderer.makeOverlay(from: baseMask) {
+                        context.draw(
+                            Image(decorative: overlay, scale: 1),
+                            in: rect
+                        )
+                    }
                     for stroke in strokes + (activeStroke.map { [$0] } ?? []) {
                         draw(stroke, in: &context, rect: rect)
                     }
@@ -723,6 +755,7 @@ private struct MaskEditor: View {
 private enum MaskRenderer {
     static func makeMask(
         image: CGImage,
+        baseMask: CGImage? = nil,
         strokes: [MaskStroke]
     ) -> CGImage? {
         guard let context = CGContext(
@@ -737,8 +770,19 @@ private enum MaskRenderer {
             return nil
         }
 
+        let imageBounds = CGRect(
+            x: 0,
+            y: 0,
+            width: image.width,
+            height: image.height
+        )
         context.setFillColor(gray: 0, alpha: 1)
-        context.fill(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        context.fill(imageBounds)
+        if let baseMask,
+           baseMask.width == image.width,
+           baseMask.height == image.height {
+            context.draw(baseMask, in: imageBounds)
+        }
 
         // DragGesture locations and the Canvas overlay use a top-left origin.
         // CGContext's default bitmap coordinate system uses a bottom-left
@@ -792,6 +836,51 @@ private enum MaskRenderer {
             return nil
         }
         return mask
+    }
+
+    static func makeOverlay(from mask: CGImage) -> CGImage? {
+        let width = mask.width
+        let height = mask.height
+        guard let grayscale = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else {
+            return nil
+        }
+        grayscale.draw(mask, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let grayscaleImage = grayscale.makeImage(),
+              let data = grayscaleImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else {
+            return nil
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let overlay = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ), let destination = overlay.data?.assumingMemoryBound(to: UInt8.self) else {
+            return nil
+        }
+
+        for index in 0..<(width * height) {
+            let alpha = UInt8(Double(bytes[index]) * 0.62)
+            let offset = index * 4
+            destination[offset] = alpha
+            destination[offset + 1] = alpha
+            destination[offset + 2] = alpha
+            destination[offset + 3] = alpha
+        }
+        return overlay.makeImage()
     }
 
     private static func containsPaint(_ image: CGImage) -> Bool {

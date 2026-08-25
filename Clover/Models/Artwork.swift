@@ -14,6 +14,10 @@ struct Artwork: Codable, Identifiable, Sendable {
     let filename: String
     let previewFrames: [ArtworkPreviewFrame]
     let generation: GenerationSnapshot
+    /// Present for inpainting results saved by current releases. Older
+    /// artworks decode these as nil and continue to open in Create.
+    let inpaintingSourceFilename: String?
+    let inpaintingMaskFilename: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -21,6 +25,8 @@ struct Artwork: Codable, Identifiable, Sendable {
         case filename
         case previewFrames
         case generation
+        case inpaintingSourceFilename
+        case inpaintingMaskFilename
     }
 
     init(
@@ -28,13 +34,17 @@ struct Artwork: Codable, Identifiable, Sendable {
         createdAt: Date,
         filename: String,
         previewFrames: [ArtworkPreviewFrame] = [],
-        generation: GenerationSnapshot
+        generation: GenerationSnapshot,
+        inpaintingSourceFilename: String? = nil,
+        inpaintingMaskFilename: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
         self.filename = filename
         self.previewFrames = previewFrames
         self.generation = generation
+        self.inpaintingSourceFilename = inpaintingSourceFilename
+        self.inpaintingMaskFilename = inpaintingMaskFilename
     }
 
     init(from decoder: Decoder) throws {
@@ -49,6 +59,14 @@ struct Artwork: Codable, Identifiable, Sendable {
         generation = try container.decode(
             GenerationSnapshot.self,
             forKey: .generation
+        )
+        inpaintingSourceFilename = try container.decodeIfPresent(
+            String.self,
+            forKey: .inpaintingSourceFilename
+        )
+        inpaintingMaskFilename = try container.decodeIfPresent(
+            String.self,
+            forKey: .inpaintingMaskFilename
         )
     }
 }

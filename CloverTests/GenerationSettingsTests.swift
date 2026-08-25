@@ -537,6 +537,71 @@ final class GenerationSettingsTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testArtworkLibraryRestoresEditableInpaintingSession() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "CloverInpaintingArtworkTests-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let rendererFormat = UIGraphicsImageRendererFormat()
+        rendererFormat.scale = 1
+        rendererFormat.opaque = true
+        let source = UIGraphicsImageRenderer(
+            size: CGSize(width: 32, height: 32),
+            format: rendererFormat
+        ).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        }
+        let mask = UIGraphicsImageRenderer(
+            size: CGSize(width: 32, height: 32),
+            format: rendererFormat
+        ).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 8, y: 8, width: 16, height: 16))
+        }
+        let sourceImage = try XCTUnwrap(source.cgImage)
+        let maskImage = try XCTUnwrap(mask.cgImage)
+        var settings = GenerationSettings.inpaintingDefaults
+        settings.prompt = "replace the square with a flower"
+
+        let library = ArtworkLibrary(directoryURL: directory)
+        let artwork = try XCTUnwrap(
+            library.add(
+                images: [GeneratedImage(cgImage: sourceImage, imageIndex: 0)],
+                settings: settings,
+                inpaintingSource: sourceImage,
+                inpaintingMask: maskImage
+            ).first
+        )
+
+        XCTAssertNotNil(artwork.inpaintingSourceFilename)
+        XCTAssertNotNil(artwork.inpaintingMaskFilename)
+
+        let restoredLibrary = ArtworkLibrary(directoryURL: directory)
+        let restoredArtwork = try XCTUnwrap(restoredLibrary.artworks.first)
+        let input = try XCTUnwrap(
+            restoredLibrary.inpaintingInput(for: restoredArtwork)
+        )
+        XCTAssertEqual(input.sourceImage.width, 32)
+        XCTAssertEqual(input.sourceImage.height, 32)
+        XCTAssertEqual(input.maskImage.width, 32)
+        XCTAssertEqual(input.maskImage.height, 32)
+
+        let route = Route()
+        route.openInpainting(
+            with: settings,
+            sourceImage: input.sourceImage,
+            maskImage: input.maskImage
+        )
+        XCTAssertEqual(route.destination, .inpainting)
+        XCTAssertEqual(route.pendingInpaintingSession?.settings, settings)
+    }
+
     func testPreviewGenerationServiceReturnsSavedStepFrames() async throws {
         var settings = GenerationSettings()
         settings.livePreviewEnabled = true

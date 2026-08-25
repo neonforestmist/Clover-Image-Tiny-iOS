@@ -73,9 +73,19 @@ struct LibraryView: View {
     }
 
     private func loadIntoStudio(_ artwork: Artwork) {
-        var settings = GenerationSettings()
-        settings.adopt(artwork.generation)
-        route.openCreate(with: settings)
+        if let input = library.inpaintingInput(for: artwork) {
+            var settings = GenerationSettings.inpaintingDefaults
+            settings.adopt(artwork.generation)
+            route.openInpainting(
+                with: settings,
+                sourceImage: input.sourceImage,
+                maskImage: input.maskImage
+            )
+        } else {
+            var settings = GenerationSettings()
+            settings.adopt(artwork.generation)
+            route.openCreate(with: settings)
+        }
     }
 }
 

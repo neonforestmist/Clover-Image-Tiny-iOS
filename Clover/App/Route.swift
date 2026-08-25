@@ -59,6 +59,7 @@ final class Route {
     var path = NavigationPath()
     var settingsPresented = false
     var pendingCreateSettings: GenerationSettings?
+    var pendingInpaintingSession: InpaintingStudioSession?
 
     func open(_ destination: Destination) {
         self.destination = destination
@@ -86,4 +87,24 @@ final class Route {
         pendingCreateSettings = settings
         open(.create)
     }
+
+    func openInpainting(
+        with settings: GenerationSettings,
+        sourceImage: CGImage,
+        maskImage: CGImage
+    ) {
+        pendingInpaintingSession = InpaintingStudioSession(
+            settings: settings,
+            sourceImage: sourceImage,
+            maskImage: maskImage
+        )
+        open(.inpainting)
+    }
+}
+
+struct InpaintingStudioSession: Identifiable, @unchecked Sendable {
+    let id = UUID()
+    let settings: GenerationSettings
+    let sourceImage: CGImage
+    let maskImage: CGImage
 }
