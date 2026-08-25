@@ -12,33 +12,67 @@ Native, private image generation on iPhone with SwiftUI, Core ML, and
 
 ## Features
 
+### Create
+
 - Runs image generation on the device after model installation
-- Apple-style SwiftUI interface for iPhone and iPad
 - Prompt and negative-prompt controls
 - 4–100 inference steps with both a slider and precise stepper
-- Saved generation timelines with previews every 1–10 steps
-- Guidance from 1.0–20.0
-- Reproducible seeds with seed randomization
-- One to four images per generation
-- Native 512 × 512 output without post-generation cropping
-- PNDM and DPM-Solver++ schedulers
-- NumPy and PyTorch-compatible random generators
-- Neural Engine, automatic, and GPU compute preferences
-- Local artwork library and Photos export
-- Dedicated **Inpainting** tab between Create and Library for image selection,
-  mask painting, and local edits
-- Canvas-first **Create** surface with a floating prompt deck and quick chips
-- iPhone uses a slide-over sidebar (not a bottom tab bar); iPad uses a split-view sidebar
-- First-class **Models** and **Settings**, plus an iPad inspector for parameters
-- Storage and thermal advisories before large downloads and while generating
-- CreativeML Open RAIL-M model license shown at the bottom of Models
+- Guidance from 1.0–20.0, reproducible seeds, and seed randomization
+- One to four images per generation at native 512 × 512 resolution
+- PNDM and DPM-Solver++ schedulers with NumPy and PyTorch-compatible random generators
+
+### Inpainting
+
+- Dedicated **Inpainting** tab for image selection, cropping, mask painting, and local edits
+- Paint and Erase tools, adjustable brush size, Undo/Redo, and exact mask compositing
+- Optional live step previews that remain attached to the finished artwork timeline
+
+### Models and LoRA styles
+
 - Base-first downloads: install Clover, then add only the styles you want
 - Mix up to three downloaded or imported LoRAs with independent strengths
 - Import a Clover-compatible `.safetensors` style from **On My iPhone → Clover → Imported Styles**
 - Visible downloads in **On My iPhone → Clover → Models**
 - Immutable model revisions with byte-count and SHA-256 verification
 
+### Library and previews
+
+- Saved generation timelines with previews every 1–10 steps
+- Local artwork library, timeline scrubbing, ZIP export, and Photos export
+
+### Apple platform integration
+
+- Apple-style SwiftUI interface for iPhone and iPad
+- iPhone slide-over sidebar; iPad split-view sidebar and parameter inspector
+- Neural Engine, automatic, and GPU compute preferences
+- Storage and thermal advisories before large downloads and while generating
+- CreativeML Open RAIL-M model license shown at the bottom of Models
+
 Output resolution is fixed at 512 × 512 by the converted Core ML models.
+
+## Set up from GitHub
+
+Clone the repository, then open the checked-in Xcode project:
+
+```bash
+git clone https://github.com/neonforestmist/Clover-Image-Tiny-iOS.git
+cd Clover-Image-Tiny-iOS
+open Clover.xcodeproj
+```
+
+The repository and app bundle do not contain model weights. Download the
+models from the **Models** screen after installing the app.
+
+### Regenerate the Xcode project
+
+The checked-in project is generated from `project.yml` with
+[XcodeGen](https://github.com/yonaskolb/XcodeGen). From the cloned repository:
+
+```bash
+brew install xcodegen
+xcodegen generate
+open Clover.xcodeproj
+```
 
 ## Requirements
 
@@ -46,8 +80,6 @@ Output resolution is fixed at 512 × 512 by the converted Core ML models.
 - iOS 18 or newer
 - A physical iPhone or iPad for Core ML image generation
 - Enough free storage for the selected Core ML model
-
-The repository and app bundle do not contain the model weights.
 
 ### Download sizes
 
@@ -241,16 +273,6 @@ showing 100% while Core ML and local persistence are still working.
 
 Inpainting performs one deterministic render for the requested seed. It does
 not silently replace the seed or run a custom salvage pass.
-
-## Regenerate the Xcode project
-
-The checked-in project is generated from `project.yml` with
-[XcodeGen](https://github.com/yonaskolb/XcodeGen):
-
-```bash
-brew install xcodegen
-xcodegen generate
-```
 
 ## License
 
