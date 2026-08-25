@@ -25,6 +25,7 @@ final class GenerationStore {
     private(set) var preview: GenerationPreview?
     var presentedSheet: SheetDestination?
     var errorMessage: String?
+    var advisory: ResourceGuard.Verdict?
 
     private let generator: any ImageGenerating
     private let library: ArtworkLibrary
@@ -36,9 +37,15 @@ final class GenerationStore {
         self.library = library
     }
 
+    func apply(_ snapshot: GenerationSnapshot) {
+        settings.adopt(snapshot)
+        settings.persist()
+    }
+
     func generate() {
         guard !phase.isWorking, !settings.trimmedPrompt.isEmpty else { return }
 
+        advisory = ResourceGuard().generationAdvisory()
         settings.persist()
         phase = .preparing
         activity = .loadingModel
@@ -102,7 +109,6 @@ final class GenerationStore {
 
 enum SheetDestination: String, Identifiable {
     case parameters
-    case models
 
     var id: String { rawValue }
 }

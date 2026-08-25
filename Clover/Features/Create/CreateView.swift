@@ -1,339 +1,456 @@
 import SwiftUI
+import UIKit
 
 struct CreateView: View {
-    @State private var store: GenerationStore
-    @FocusState private var focusedField: Field?
+    @Bindable var store: GenerationStore
     private let library: ArtworkLibrary
     private let modelManager: ModelManager
+    @State private var showsNegative = false
+    @State private var timelineSelection = 0
+    @State private var promptIsFocused = false
+    @State private var negativePromptIsFocused = false
 
-    private enum Field {
+    private enum ScrollTarget: Hashable {
         case prompt
         case negativePrompt
     }
 
     init(
-        generator: any ImageGenerating,
+        store: GenerationStore,
         library: ArtworkLibrary,
         modelManager: ModelManager
     ) {
+        self.store = store
         self.library = library
         self.modelManager = modelManager
-        _store = State(
-            initialValue: GenerationStore(
-                generator: generator,
-                library: library
-            )
-        )
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                OutputCanvas(
-                    artworks: store.latest,
-                    phase: store.phase,
-                    preview: store.preview,
-                    activity: store.activity
-                )
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 24) {
+                    OutputCanvas(
+                        artworks: store.latest,
+                        phase: store.phase,
+                        preview: store.preview,
+                        activity: store.activity,
+                        frameSelection: $timelineSelection
+                    )
+                    .aspectRatio(1, contentMode: .fit)
+                    .frame(maxWidth: 720)
 
-                modelButton
-                promptSection
-            }
-            .padding()
-            .padding(.bottom, 12)
-        }
-        .scrollDismissesKeyboard(.immediately)
-        .environment(library)
-        .navigationTitle("Create")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    focusedField = nil
-                    store.presentedSheet = .parameters
-                } label: {
-                    Label("Parameters", systemImage: "slider.horizontal.3")
-                }
-                .accessibilityIdentifier("parameters-button")
-                .disabled(store.phase.isWorking)
-            }
+                    if let advisory = store.advisory {
+                        ResourceAdvisoryBanner(verdict: advisory)
+                    }
 
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") {
-                    focusedField = nil
+                    if !store.phase.isWorking, let artwork = store.latest.first {
+                        ArtworkTimelineControls(
+                            artwork: artwork,
+                            selection: $timelineSelection,
+                            showsExportAction: true
+                        )
+                    }
+
+                    promptSection
                 }
-                .fontWeight(.semibold)
-                .accessibilityIdentifier("dismiss-keyboard-button")
+                .frame(maxWidth: 720)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
             }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if focusedField == nil {
-                generationAction
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
+            .environment(library)
+            .scrollDismissesKeyboard(.immediately)
+            .scrollIndicators(.automatic)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Create")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    parametersButton
+                }
             }
-        }
-        .sheet(item: $store.presentedSheet) { destination in
-            switch destination {
-            case .parameters:
-                GenerationSettingsSheet(settings: $store.settings)
-            case .models:
-                ModelPickerView(
-                    settings: $store.settings,
-                    manager: modelManager
+            .sheet(item: $store.presentedSheet) { destination in
+                switch destination {
+                case .parameters:
+                    GenerationSettingsSheet(
+                        settings: $store.settings,
+                        manager: modelManager
+                    )
+                }
+            }
+            .task {
+                await modelManager.refreshCatalog()
+            }
+            .alert(
+                "Couldn’t Generate",
+                isPresented: Binding(
+                    get: { store.errorMessage != nil },
+                    set: { if !$0 { store.errorMessage = nil } }
                 )
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(store.errorMessage ?? "")
             }
-        }
-        .task {
-            await modelManager.refreshCatalog()
-        }
-        .alert(
-            "Couldn’t Generate",
-            isPresented: Binding(
-                get: { store.errorMessage != nil },
-                set: { if !$0 { store.errorMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(store.errorMessage ?? "")
+            .keyboardShortcut(.return, modifiers: .command)
+            .onKeyPress(.escape) {
+                if store.phase.isWorking {
+                    store.cancel()
+                    return .handled
+                }
+                return .ignored
+            }
+            .onChange(of: negativePromptIsFocused) { _, isFocused in
+                if isFocused {
+                    reveal(.negativePrompt, using: proxy)
+                }
+            }
+            .onChange(of: promptIsFocused) { _, isFocused in
+                if isFocused {
+                    reveal(.prompt, using: proxy)
+                }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: UIResponder.keyboardWillChangeFrameNotification
+                )
+            ) { _ in
+                if promptIsFocused {
+                    reveal(.prompt, using: proxy)
+                } else if negativePromptIsFocused {
+                    reveal(.negativePrompt, using: proxy)
+                }
+            }
         }
     }
 
-    private var modelButton: some View {
-        Button {
-            focusedField = nil
-            store.presentedSheet = .models
-        } label: {
-            HStack(spacing: 12) {
-                modelIcon
-                    .foregroundStyle(.cloverGreen)
-                    .frame(width: 34, height: 34)
-                    .background(.quaternary, in: .circle)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(styleDisplayName)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Text(modelStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(12)
-            .background(
-                Color(.secondarySystemBackground),
-                in: .rect(cornerRadius: 14)
-            )
+    private func reveal(
+        _ target: ScrollTarget,
+        using proxy: ScrollViewProxy
+    ) {
+        withAnimation(.easeOut(duration: 0.25)) {
+            proxy.scrollTo(target, anchor: .bottom)
         }
-        .buttonStyle(.plain)
+    }
+
+    private var parametersButton: some View {
+        Button("Parameters", systemImage: "slider.horizontal.3") {
+            store.presentedSheet = .parameters
+        }
+        .labelStyle(.iconOnly)
+        .accessibilityIdentifier("parameters-button")
         .disabled(store.phase.isWorking)
-        .accessibilityIdentifier("model-picker-button")
-    }
-
-    @ViewBuilder
-    private var modelIcon: some View {
-        if let variant = selectedVariant {
-            Image(variant.iconAssetName)
-                .resizable()
-                .scaledToFit()
-                .padding(7)
-        } else {
-            Image(systemName: "paintpalette.fill")
-                .font(.title3)
-        }
+        .keyboardShortcut("0", modifiers: .command)
     }
 
     private var promptSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Prompt")
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Prompt", systemImage: "text.bubble")
                 .font(.headline)
 
-            ZStack(alignment: .topLeading) {
-                if store.settings.prompt.isEmpty {
-                    Text("Describe the image you want")
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 8)
-                        .allowsHitTesting(false)
+            PromptTokenEditor(
+                text: promptBody,
+                tokens: styleTriggerTokens,
+                placeholder: "Describe the image you want to create",
+                accessibilityLabel: "Prompt",
+                accessibilityIdentifier: "prompt-field",
+                minimumHeight: 120,
+                removeToken: removeStyle,
+                onFocusChange: { isFocused in
+                    promptIsFocused = isFocused
                 }
-
-                TextEditor(text: $store.settings.prompt)
-                    .scrollContentBackground(.hidden)
-                    .focused($focusedField, equals: .prompt)
-                    .textInputAutocapitalization(.sentences)
-                    .accessibilityLabel("Prompt")
-                    .accessibilityIdentifier("prompt-field")
-            }
-            .frame(height: 112)
-            .padding(10)
-            .background(
-                Color(.secondarySystemBackground),
-                in: .rect(cornerRadius: 14)
             )
+            .id(ScrollTarget.prompt)
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Label("Negative Prompt", systemImage: "eye.slash")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-
-                    Spacer()
-
-                    Text("Optional")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Toggle(isOn: $showsNegative) {
+                    Label("Show Negative Prompt", systemImage: "eye.slash")
                 }
+            .accessibilityIdentifier("negative-prompt-toggle")
 
-                ZStack(alignment: .topLeading) {
-                    if store.settings.negativePrompt.isEmpty {
-                        Text("What should Clover avoid?")
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 8)
-                            .allowsHitTesting(false)
+            if showsNegative {
+                PromptTokenEditor(
+                    text: $store.settings.negativePrompt,
+                    tokens: [],
+                    placeholder: "Describe what Clover should avoid",
+                    accessibilityLabel: "Negative prompt",
+                    accessibilityIdentifier: "negative-prompt-field",
+                    minimumHeight: 88,
+                    removeToken: { _ in },
+                    onFocusChange: { isFocused in
+                        negativePromptIsFocused = isFocused
                     }
-
-                    TextEditor(text: $store.settings.negativePrompt)
-                        .scrollContentBackground(.hidden)
-                        .focused(
-                            $focusedField,
-                            equals: .negativePrompt
-                        )
-                        .textInputAutocapitalization(.sentences)
-                        .accessibilityLabel("Negative Prompt")
-                }
-                .frame(height: 72)
-
-                Text("Describe details you don’t want in the generated image.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                )
+                .id(ScrollTarget.negativePrompt)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .padding(14)
-            .background(
-                Color(.secondarySystemBackground),
-                in: .rect(cornerRadius: 14)
-            )
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("negative-prompt-field")
 
-            parameterSummary
+            if store.phase.isWorking {
+                GenerationProgressStatus(
+                    progress: generationProgress,
+                    activity: store.activity
+                )
+            } else if !modelManager.isBaseInstalled {
+                Label(
+                    "Download Clover from Models before generating.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.footnote)
+                .foregroundStyle(.orange)
+                .accessibilityIdentifier("model-not-loaded-label")
+            }
+
+            generationAction
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.default, value: showsNegative)
     }
 
-    private var parameterSummary: some View {
-        HStack(spacing: 8) {
-            ParameterPill(
-                title: "\(store.settings.stepCount) steps",
-                systemImage: "arrow.triangle.2.circlepath"
-            )
-            ParameterPill(
-                title: String(format: "%.1f CFG", store.settings.guidanceScale),
-                systemImage: "scope"
-            )
-            ParameterPill(
-                title: "#\(store.settings.seed)",
-                systemImage: "dice"
-            )
+    private var promptBody: Binding<String> {
+        Binding(
+            get: {
+                store.settings.promptBody(
+                    removingStyleTriggers: styleTriggerTokens.map(\.title)
+                )
+            },
+            set: { body in
+                store.settings.setPromptBody(
+                    body,
+                    styleTriggers: styleTriggerTokens.map(\.title)
+                )
+            }
+        )
+    }
+
+    private var styleTriggerTokens: [PromptToken] {
+        store.settings.styleIDs.compactMap { id in
+            let trigger = modelManager.variant(id: id)?.trigger
+                ?? modelManager.importedStyle(id: id)?.trigger
+            return trigger.map { PromptToken(id: id, title: $0) }
         }
-        .font(.caption)
-        .lineLimit(1)
+    }
+
+    private func removeStyle(_ id: String) {
+        let previousTokens = styleTriggerTokens
+        store.settings.styleIDs.removeAll { $0 == id }
+        store.settings.styleStrengths[id] = nil
+        let nextTokens = styleTriggerTokens
+        store.settings.applyStyleTriggers(
+            nextTokens.map(\.title),
+            replacing: previousTokens.map(\.title)
+        )
+        store.settings.persist()
     }
 
     @ViewBuilder
     private var generationAction: some View {
-        VStack(spacing: 8) {
-            if case let .generating(progress) = store.phase {
-                GenerationProgressStatus(
-                    progress: progress,
-                    activity: store.activity
-                )
-                .accessibilityIdentifier("generation-stage")
+        if store.phase.isWorking {
+            Button(role: .cancel) {
+                store.cancel()
+            } label: {
+                Label("Cancel Generation", systemImage: "stop.fill")
+                    .frame(maxWidth: .infinity)
             }
-
-            if store.phase.isWorking {
-                Button(role: .cancel) {
-                    store.cancel()
-                } label: {
-                    Label(statusTitle, systemImage: "xmark.circle.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-            } else {
-                if selectedModelsAreInstalled {
-                    PrimaryGenerationButton(
-                        title: "Generate",
-                        systemImage: "wand.and.stars",
-                        isEnabled: !store.settings.trimmedPrompt.isEmpty
-                    ) {
-                        focusedField = nil
-                        store.generate()
-                    }
-                    .accessibilityIdentifier("generate-button")
-                } else {
-                    PrimaryGenerationButton(
-                        title: "Generate",
-                        systemImage: "wand.and.stars",
-                        isEnabled: false,
-                        action: {}
-                    )
-                    .accessibilityIdentifier("generate-button")
-                }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+        } else {
+            Button {
+                store.generate()
+            } label: {
+                Label("Generate", systemImage: "wand.and.stars")
+                    .frame(maxWidth: .infinity)
             }
-        }
-        .padding(.top, 4)
-    }
-
-    private var statusTitle: String {
-        switch store.phase {
-        case .preparing:
-            "Preparing model…"
-        case .generating:
-            "Cancel"
-        case .idle, .finished:
-            "Cancel"
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!canGenerate)
+            .accessibilityIdentifier("generate-button")
         }
     }
 
-    private var selectedVariant: ModelCatalog.Variant? {
-        store.settings.styleIDs.first.flatMap {
-            modelManager.variant(id: $0)
-        } ?? modelManager.variant(id: ModelManager.baseID)
+    private var generationProgress: Double {
+        if case let .generating(value) = store.phase { return value }
+        return store.phase == .preparing ? 0.04 : 0.98
     }
 
-    private var modelStatus: String {
-        guard modelManager.isBaseInstalled else {
-            return "Tap to download Clover"
-        }
-        let unavailable = store.settings.styleIDs.filter {
-            !modelManager.isInstalled($0)
-        }
-        if !unavailable.isEmpty {
-            return "A selected style needs to be downloaded again"
-        }
-        if store.settings.styleIDs.isEmpty {
-            return "Installed · Runs on device"
-        }
-        return "\(store.settings.styleIDs.count) \(store.settings.styleIDs.count == 1 ? "style" : "styles") mixed on device"
-    }
-
-    private var styleDisplayName: String {
-        let names = store.settings.styleIDs.compactMap {
-            modelManager.displayName(for: $0)
-        }
-        return names.isEmpty ? "Clover" : names.joined(separator: " + ")
+    private var canGenerate: Bool {
+        selectedModelsAreInstalled && !store.settings.trimmedPrompt.isEmpty
     }
 
     private var selectedModelsAreInstalled: Bool {
         modelManager.isBaseInstalled
             && store.settings.styleIDs.allSatisfy(modelManager.isInstalled)
+    }
+}
+
+struct PromptToken: Identifiable, Equatable {
+    let id: String
+    let title: String
+}
+
+struct PromptTokenEditor: View {
+    @Binding var text: String
+    let tokens: [PromptToken]
+    let placeholder: String
+    let accessibilityLabel: String
+    let accessibilityIdentifier: String
+    let minimumHeight: CGFloat
+    let removeToken: (String) -> Void
+    var onFocusChange: (Bool) -> Void = { _ in }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !tokens.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(tokens) { token in
+                            Button {
+                                removeToken(token.id)
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Text(token.title)
+                                        .lineLimit(1)
+                                    Image(systemName: "xmark")
+                                        .font(.caption2.weight(.bold))
+                                }
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tint)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Color.accentColor.opacity(0.14),
+                                    in: .rect(cornerRadius: 8)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("\(token.title) trigger")
+                            .accessibilityHint("Removes this trigger and LoRA")
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    .padding(.bottom, 4)
+                }
+            }
+
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text(placeholder)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .allowsHitTesting(false)
+                }
+
+                BackspaceAwareTextView(
+                    text: $text,
+                    accessibilityLabel: accessibilityLabel,
+                    accessibilityIdentifier: accessibilityIdentifier,
+                    onDeleteAtBeginning: {
+                        if let token = tokens.last {
+                            removeToken(token.id)
+                        }
+                    },
+                    onFocusChange: onFocusChange
+                )
+            }
+            .frame(minHeight: minimumHeight)
+        }
+        .background(
+            Color(.secondarySystemGroupedBackground),
+            in: .rect(cornerRadius: 12, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color(.separator).opacity(0.35))
+        }
+    }
+}
+
+private struct BackspaceAwareTextView: UIViewRepresentable {
+    @Binding var text: String
+    let accessibilityLabel: String
+    let accessibilityIdentifier: String
+    let onDeleteAtBeginning: () -> Void
+    let onFocusChange: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> DeletionAwareTextView {
+        let textView = DeletionAwareTextView()
+        textView.delegate = context.coordinator
+        textView.backgroundColor = .clear
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.adjustsFontForContentSizeCategory = true
+        textView.autocapitalizationType = .sentences
+        textView.keyboardDismissMode = .onDrag
+        textView.returnKeyType = .done
+        textView.textContainer.lineFragmentPadding = 0
+        textView.textContainerInset = UIEdgeInsets(
+            top: 10,
+            left: 12,
+            bottom: 10,
+            right: 12
+        )
+        textView.accessibilityLabel = accessibilityLabel
+        textView.accessibilityIdentifier = accessibilityIdentifier
+        return textView
+    }
+
+    func updateUIView(
+        _ textView: DeletionAwareTextView,
+        context: Context
+    ) {
+        context.coordinator.parent = self
+        if textView.text != text {
+            textView.text = text
+        }
+        textView.onDeleteAtBeginning = onDeleteAtBeginning
+        textView.accessibilityLabel = accessibilityLabel
+        textView.accessibilityIdentifier = accessibilityIdentifier
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: BackspaceAwareTextView
+
+        init(parent: BackspaceAwareTextView) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.onFocusChange(true)
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.onFocusChange(false)
+        }
+
+        func textView(
+            _ textView: UITextView,
+            shouldChangeTextIn range: NSRange,
+            replacementText text: String
+        ) -> Bool {
+            guard text == "\n" else { return true }
+            textView.resignFirstResponder()
+            return false
+        }
+    }
+}
+
+private final class DeletionAwareTextView: UITextView {
+    var onDeleteAtBeginning: (() -> Void)?
+
+    override func deleteBackward() {
+        if selectedRange.location == 0,
+           selectedRange.length == 0,
+           let onDeleteAtBeginning {
+            onDeleteAtBeginning()
+            return
+        }
+        super.deleteBackward()
     }
 }
 
@@ -346,32 +463,12 @@ struct PrimaryGenerationButton: View {
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .fontWeight(.semibold)
+                .font(.headline)
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(CloverPrimaryActionButtonStyle())
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
         .disabled(!isEnabled)
-    }
-}
-
-private struct CloverPrimaryActionButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(isEnabled ? Color.white : Color.secondary)
-            .padding(.vertical, 13)
-            .background {
-                Capsule()
-                    .fill(
-                        isEnabled
-                            ? Color.accentColor.opacity(configuration.isPressed ? 0.78 : 1)
-                            : Color.secondary.opacity(0.18)
-                    )
-            }
-            .contentShape(.capsule)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -393,32 +490,23 @@ struct GenerationProgressStatus: View {
             .foregroundStyle(.secondary)
 
             ProgressView(value: progress)
-                .tint(.cloverGreen)
+                .tint(.accentColor)
                 .accessibilityLabel("Generation progress")
                 .accessibilityValue("\(Int(progress * 100)) percent")
         }
     }
 }
 
-private struct ParameterPill: View {
-    let title: String
-    let systemImage: String
-
-    var body: some View {
-        Label(title, systemImage: systemImage)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.quaternary, in: .capsule)
-            .foregroundStyle(.secondary)
-    }
-}
-
 #Preview {
     NavigationStack {
         CreateView(
-            generator: PreviewGenerationService(),
+            store: GenerationStore(
+                generator: PreviewGenerationService(),
+                library: .preview
+            ),
             library: .preview,
             modelManager: ModelManager(previewInstalled: true)
         )
+        .environment(Route())
     }
 }

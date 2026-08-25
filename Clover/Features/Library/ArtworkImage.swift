@@ -69,8 +69,7 @@ struct ArtworkTimelineControls: View {
     }
 
     var body: some View {
-        if !previews.isEmpty {
-            VStack(spacing: 10) {
+        VStack(spacing: 8) {
                 HStack(spacing: 12) {
                     Label(
                         "Step \(selectedStep) of \(artwork.generation.stepCount)",
@@ -112,9 +111,8 @@ struct ArtworkTimelineControls: View {
                     accessibilityIdentifier: "artwork-timeline-slider"
                 )
             }
-            .onAppear {
-                selection = selectedIndex
-            }
+        .onAppear {
+            selection = selectedIndex
         }
     }
 }

@@ -45,11 +45,14 @@ struct InpaintingModelManifest: Codable, Sendable {
         case resources
     }
 
-    static let repositoryRevision = "23f9a3693f6c1c8b8b02681a07e84178403fd073"
+    static let repositoryRevision = "67b44c84778e94c92ffb8d9086e3f76b38fbfb28"
+    /// Identifies the full-float, stateless Core ML pipeline converted from
+    /// the published nine-channel Diffusers inpainting checkpoint.
+    static let installationVersion = "\(repositoryRevision)-pipeline-v1-fp16"
     static let revisionMarkerName = ".clover-inpainting-revision"
 
     static let remoteURL = URL(
-        string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML/resolve/\(repositoryRevision)/manifest.json"
+        string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML/resolve/\(repositoryRevision)/manifest-pipeline.json"
     )!
 
     static func isRevisionCurrent(at resourcesURL: URL) -> Bool {
@@ -61,7 +64,7 @@ struct InpaintingModelManifest: Codable, Sendable {
             return false
         }
         return storedRevision.trimmingCharacters(in: .whitespacesAndNewlines)
-            == repositoryRevision
+            == installationVersion
     }
 
     static var hasCurrentInstallation: Bool {
@@ -76,6 +79,56 @@ struct InpaintingModelManifest: Codable, Sendable {
     var totalSizeInMegabytes: String {
         let megabytes = Int((Double(totalSize) / 1_000_000).rounded())
         return "\(megabytes.formatted()) MB"
+    }
+
+    /// Validates only the files owned by the standalone inpainting download.
+    /// The tokenizer, text encoder, and VAE decoder are intentionally absent
+    /// from this manifest because the installer reuses them from Clover.
+    var isValidForInstallation: Bool {
+        guard schemaVersion == 3,
+              resolution == [512, 512],
+              !resources.isEmpty,
+              resources.allSatisfy({ resource in
+                  resource.size >= 0
+                      && Self.isSafeRelativePath(resource.path)
+                      && resource.sha256.count == 64
+                      && resource.sha256.allSatisfy(\.isHexDigit)
+              }) else {
+            return false
+        }
+
+        let paths = Set(resources.map(\.path))
+        func hasCompiledModel(_ name: String) -> Bool {
+            [
+                "\(name).mlmodelc/metadata.json",
+                "\(name).mlmodelc/model.mil",
+                "\(name).mlmodelc/weights/weight.bin",
+            ].allSatisfy(paths.contains)
+        }
+
+        let hasCompiledPipeline = [
+            "UnetPipeline.mlmodelc/metadata.json",
+            "UnetPipeline.mlmodelc/model0/model.mil",
+            "UnetPipeline.mlmodelc/model0/weights/0-weight.bin",
+            "UnetPipeline.mlmodelc/model1/model.mil",
+            "UnetPipeline.mlmodelc/model1/weights/1-weight.bin",
+        ].allSatisfy(paths.contains)
+
+        let hasSingleUnet = hasCompiledModel("Unet")
+        let hasChunkedUnet = ["UnetChunk1", "UnetChunk2"]
+            .allSatisfy(hasCompiledModel)
+        return hasCompiledModel("VAEEncoder")
+            && (hasCompiledPipeline || hasSingleUnet || hasChunkedUnet)
+    }
+
+    private static func isSafeRelativePath(_ path: String) -> Bool {
+        guard !path.isEmpty,
+              !path.hasPrefix("/"),
+              !path.contains("\\") else {
+            return false
+        }
+        return path.split(separator: "/", omittingEmptySubsequences: false)
+            .allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
     }
 
     func downloadURL(for resource: Resource) -> URL {
@@ -114,6 +167,9 @@ enum InpaintingModelError: LocalizedError {
 }
 
 final class InpaintingModelDownloader: Sendable {
+    static let stagingDirectoryName = "Inpainting.staging"
+    static let legacyStagingDirectoryName = "Resources.staging"
+
     func fetchManifest() async throws -> InpaintingModelManifest {
         let (data, response) = try await URLSession.shared.data(
             from: InpaintingModelManifest.remoteURL
@@ -126,16 +182,7 @@ final class InpaintingModelDownloader: Sendable {
             InpaintingModelManifest.self,
             from: data
         )
-        guard manifest.schemaVersion == 2,
-              manifest.resources.contains(where: {
-                  $0.path == "VAEEncoder.mlmodelc/model.mil"
-              }),
-              manifest.resources.contains(where: {
-                  $0.path == "Unet.mlmodelc/model.mil"
-              }),
-              manifest.resources.contains(where: {
-                  $0.path == "adapter-schema.json"
-              }) else {
+        guard manifest.isValidForInstallation else {
             throw InpaintingModelError.invalidManifest
         }
         return manifest
@@ -146,11 +193,8 @@ final class InpaintingModelDownloader: Sendable {
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> URL {
         let finalURL = ModelStorage.inpaintingResourcesURL
-        let stagingURL = finalURL.deletingLastPathComponent()
-            .appending(path: "Resources.staging", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(
-            at: stagingURL,
-            withIntermediateDirectories: true
+        let stagingURL = try prepareStagingDirectory(
+            parentURL: finalURL.deletingLastPathComponent()
         )
         try installSharedCloverResources(into: stagingURL)
 
@@ -210,7 +254,7 @@ final class InpaintingModelDownloader: Sendable {
               FileManager.default.fileExists(atPath: stagingURL.path) else {
             throw InpaintingModelError.incompletePackage
         }
-        try (InpaintingModelManifest.repositoryRevision + "\n").write(
+        try (InpaintingModelManifest.installationVersion + "\n").write(
             to: stagingURL.appending(
                 path: InpaintingModelManifest.revisionMarkerName
             ),
@@ -223,6 +267,38 @@ final class InpaintingModelDownloader: Sendable {
         try FileManager.default.moveItem(at: stagingURL, to: finalURL)
         progress(1)
         return finalURL
+    }
+
+    /// Migrates the legacy staging folder and preserves verified downloads so
+    /// a retry does not need to fetch the large U-Net again. Every write into
+    /// this directory is idempotent and verified against the manifest.
+    func prepareStagingDirectory(parentURL: URL) throws -> URL {
+        let fileManager = FileManager.default
+        let stagingURL = parentURL.appending(
+            path: Self.stagingDirectoryName,
+            directoryHint: .isDirectory
+        )
+        let legacyURL = parentURL.appending(
+            path: Self.legacyStagingDirectoryName,
+            directoryHint: .isDirectory
+        )
+
+        if itemExists(at: stagingURL) {
+            if itemExists(at: legacyURL) {
+                try fileManager.removeItem(at: legacyURL)
+            }
+            return stagingURL
+        }
+        if itemExists(at: legacyURL) {
+            try fileManager.moveItem(at: legacyURL, to: stagingURL)
+            return stagingURL
+        }
+
+        try fileManager.createDirectory(
+            at: stagingURL,
+            withIntermediateDirectories: true
+        )
+        return stagingURL
     }
 
     private func copyVerifiedResource(
@@ -259,7 +335,8 @@ final class InpaintingModelDownloader: Sendable {
         }
     }
 
-    private func linkOrCopyTree(from source: URL, to destination: URL) throws {
+    func linkOrCopyTree(from sourceURL: URL, to destination: URL) throws {
+        let source = sourceURL.resolvingSymlinksInPath()
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(
             atPath: source.path,
@@ -272,22 +349,29 @@ final class InpaintingModelDownloader: Sendable {
             return
         }
 
+        if itemExists(at: destination) {
+            try FileManager.default.removeItem(at: destination)
+        }
         try FileManager.default.createDirectory(
             at: destination,
             withIntermediateDirectories: true
         )
         guard let enumerator = FileManager.default.enumerator(
-            at: source,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
+            atPath: source.path
         ) else {
             throw InpaintingModelError.requiresClover
         }
-        for case let sourceItem as URL in enumerator {
-            let relativePath = sourceItem.path.dropFirst(source.path.count + 1)
-            let destinationItem = destination.appending(path: String(relativePath))
-            let values = try sourceItem.resourceValues(forKeys: [.isDirectoryKey])
-            if values.isDirectory == true {
+        for case let relativePath as String in enumerator {
+            let sourceItem = source.appending(path: relativePath)
+            let destinationItem = destination.appending(path: relativePath)
+            var isChildDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(
+                atPath: sourceItem.path,
+                isDirectory: &isChildDirectory
+            ) else {
+                throw InpaintingModelError.requiresClover
+            }
+            if isChildDirectory.boolValue {
                 try FileManager.default.createDirectory(
                     at: destinationItem,
                     withIntermediateDirectories: true
@@ -299,18 +383,39 @@ final class InpaintingModelDownloader: Sendable {
     }
 
     private func linkOrCopyFile(from source: URL, to destination: URL) throws {
+        let fileManager = FileManager.default
+        let resolvedSource = source.resolvingSymlinksInPath()
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
+
+        let temporaryURL = destination.deletingLastPathComponent().appending(
+            path: ".clover-\(UUID().uuidString).tmp"
+        )
+        defer {
+            if itemExists(at: temporaryURL) {
+                try? fileManager.removeItem(at: temporaryURL)
+            }
         }
+
         do {
-            try FileManager.default.linkItem(at: source, to: destination)
+            try fileManager.linkItem(at: resolvedSource, to: temporaryURL)
         } catch {
-            try FileManager.default.copyItem(at: source, to: destination)
+            if itemExists(at: temporaryURL) {
+                try fileManager.removeItem(at: temporaryURL)
+            }
+            try fileManager.copyItem(at: resolvedSource, to: temporaryURL)
         }
+
+        if itemExists(at: destination) {
+            try fileManager.removeItem(at: destination)
+        }
+        try fileManager.moveItem(at: temporaryURL, to: destination)
+    }
+
+    private func itemExists(at url: URL) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
     }
 
     private func isValid(
@@ -430,10 +535,33 @@ final class InpaintingModelManager {
 
     func cancel() {
         task?.cancel()
-        task = nil
         if !InpaintingModelManifest.hasCurrentInstallation {
             state = .notInstalled
         }
+    }
+
+    func removeDownload() {
+        guard !state.isWorking else { return }
+        let fileManager = FileManager.default
+        let installedURL = ModelStorage.inpaintingResourcesURL
+        let parentURL = installedURL.deletingLastPathComponent()
+        let removableURLs = [
+            installedURL,
+            parentURL.appending(
+                path: InpaintingModelDownloader.stagingDirectoryName,
+                directoryHint: .isDirectory
+            ),
+            parentURL.appending(
+                path: InpaintingModelDownloader.legacyStagingDirectoryName,
+                directoryHint: .isDirectory
+            ),
+        ]
+
+        for url in removableURLs where fileManager.fileExists(atPath: url.path) {
+            try? fileManager.removeItem(at: url)
+        }
+        manifest = nil
+        state = .notInstalled
     }
 }
 

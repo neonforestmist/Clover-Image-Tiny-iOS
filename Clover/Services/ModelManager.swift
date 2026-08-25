@@ -28,6 +28,7 @@ final class ModelManager {
     private let previewInstalled: Bool
 
     init(previewInstalled: Bool? = nil) {
+        ModelStorage.reclaimUnusedRuntimeFiles()
         self.previewInstalled = previewInstalled
             ?? ProcessInfo.processInfo.arguments.contains("-ui-testing-preview")
         catalog = Self.cachedCatalog() ?? .bootstrap
@@ -184,12 +185,16 @@ final class ModelManager {
 
     func requiredDownloadSize(for variant: ModelCatalog.Variant) -> Int64 {
         if variant.id == Self.baseID {
-            return catalog.common.downloadSize + variant.downloadSize
+            return ModelStorage.runtimeCommonFiles(catalog.common.files)
+                .reduce(variant.downloadSize) { $0 + $1.size }
         }
         // Once Clover is installed a style only adds its own (often shared and
         // therefore zero-byte) files.
         return variant.downloadSize
-            + (isBaseInstalled ? 0 : catalog.common.downloadSize)
+            + (isBaseInstalled
+                ? 0
+                : ModelStorage.runtimeCommonFiles(catalog.common.files)
+                    .reduce(Int64(0)) { $0 + $1.size })
     }
 
     private func removeInstalledFiles(id: String) {

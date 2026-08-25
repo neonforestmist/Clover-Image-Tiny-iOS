@@ -1,45 +1,52 @@
 import CoreGraphics
-import CryptoKit
 import Foundation
+import UIKit
 import XCTest
 @testable import Clover
 
 final class InpaintingTests: XCTestCase {
-    func testInstalledHighQualityInpaintingWithThreeStylesOnPhysicalDevice() async throws {
+    func testInstalledHighQualityInpaintingOnPhysicalDevice() async throws {
         guard ProcessInfo.processInfo.environment["CLOVER_DEVICE_MODEL_TEST"] == "1" else {
             throw XCTSkip("Set CLOVER_DEVICE_MODEL_TEST=1 for the opt-in physical model test.")
         }
         XCTAssertTrue(ModelStorage.hasInpaintingResources)
         XCTAssertTrue(InpaintingModelManifest.hasCurrentInstallation)
-        try await ensureStylesAvailable([
-            "monet",
-            "pointillism",
-            "watercolor-anime",
-        ])
-
-        let source = try XCTUnwrap(
-            makeRGBAImage(width: 512, height: 512) { index in
-                let x = index % 512
-                let y = index / 512
-                return (
-                    UInt8(40 + (x * 120 / 511)),
-                    UInt8(70 + (y * 100 / 511)),
-                    110,
-                    255
-                )
-            }
+        let fixtureDirectory = ModelStorage.rootURL.appending(
+            path: "Validation",
+            directoryHint: .isDirectory
         )
-        let mask = try XCTUnwrap(makeMaskImage(width: 512, height: 512))
+        let fixtureSource = UIImage(
+            contentsOfFile: fixtureDirectory.appending(path: "cat-source.png").path
+        )?.cgImage
+        let fixtureMask = UIImage(
+            contentsOfFile: fixtureDirectory.appending(path: "cat-mask.png").path
+        )?.cgImage
+        let source = try XCTUnwrap(fixtureSource ?? makeRGBAImage(
+            width: 512,
+            height: 512
+        ) { index in
+            let x = index % 512
+            let y = index / 512
+            return (
+                UInt8(40 + (x * 120 / 511)),
+                UInt8(70 + (y * 100 / 511)),
+                110,
+                255
+            )
+        })
+        let mask = try XCTUnwrap(fixtureMask ?? makeMaskImage(
+            width: 512,
+            height: 512,
+            maskRect: CGRect(x: 144, y: 176, width: 224, height: 176)
+        ))
         var settings = GenerationSettings.inpaintingDefaults
-        settings.prompt = "Monet, pointillism, watercolor anime, a red flower in a ceramic vase"
+        settings.prompt = fixtureSource == nil
+            ? "an orange cat"
+            : "a tabby cat sitting naturally on the wooden park bench"
         settings.negativePrompt = "blurry, distorted"
-        settings.stepCount = 4
+        settings.stepCount = fixtureSource == nil ? 20 : 30
         settings.computeTarget = .neuralEngine
         settings.livePreviewEnabled = false
-        settings.styleIDs = ["monet", "pointillism", "watercolor-anime"]
-        settings.setStyleStrength(0.7, for: "monet")
-        settings.setStyleStrength(0.45, for: "pointillism")
-        settings.setStyleStrength(1.1, for: "watercolor-anime")
 
         let result = try await CoreMLInpaintingService().generate(
             resourcesURL: ModelStorage.inpaintingResourcesURL,
@@ -49,68 +56,120 @@ final class InpaintingTests: XCTestCase {
             progress: { _ in }
         )
         let image = try XCTUnwrap(result.images.first?.cgImage)
+        let attachment = XCTAttachment(
+            image: UIImage(cgImage: image),
+            quality: .original
+        )
+        attachment.name = "Physical inpainting result"
+        attachment.lifetime = .keepAlways
+        add(attachment)
         XCTAssertEqual(image.width, 512)
         XCTAssertEqual(image.height, 512)
-    }
-
-    private func ensureStylesAvailable(_ ids: [String]) async throws {
-        let missing = ids.filter {
-            ModelStorage.styleWeightsURL(for: $0) == nil
+        let output = try XCTUnwrap(rgbaPixels(image))
+        let input = try XCTUnwrap(rgbaPixels(source))
+        var changedPixels = 0
+        for index in 0..<(output.count / 4) {
+            let offset = index * 4
+            let difference = abs(Int(output[offset]) - Int(input[offset]))
+                + abs(Int(output[offset + 1]) - Int(input[offset + 1]))
+                + abs(Int(output[offset + 2]) - Int(input[offset + 2]))
+            if difference > 24 {
+                changedPixels += 1
+            }
         }
-        guard !missing.isEmpty else { return }
-
-        let (data, response) = try await URLSession.shared.data(
-            from: ModelCatalog.remoteURL
+        XCTAssertGreaterThan(
+            Double(changedPixels) / Double(output.count / 4),
+            0.01,
+            "inpainting did not materially edit the masked region"
         )
-        let httpResponse = try XCTUnwrap(response as? HTTPURLResponse)
-        XCTAssertTrue(200..<300 ~= httpResponse.statusCode)
-        let catalog = try JSONDecoder().decode(ModelCatalog.self, from: data)
-        for id in missing {
-            let variant = try XCTUnwrap(catalog.variant(id: id))
-            let file = try XCTUnwrap(variant.files.first(where: {
-                $0.path.hasSuffix(".safetensors")
-            }))
-            let (weights, weightsResponse) = try await URLSession.shared.data(
-                from: catalog.downloadURL(
-                    for: file,
-                    revision: variant.revision,
-                    repository: variant.repository
-                )
-            )
-            let httpResponse = try XCTUnwrap(
-                weightsResponse as? HTTPURLResponse
-            )
-            XCTAssertTrue(200..<300 ~= httpResponse.statusCode)
-            XCTAssertEqual(Int64(weights.count), file.size)
-            XCTAssertEqual(
-                SHA256.hash(data: weights).map {
-                    String(format: "%02x", $0)
-                }.joined(),
-                file.sha256
-            )
-            let destination = ModelStorage.rootURL
-                .appending(path: "Variants", directoryHint: .isDirectory)
-                .appending(path: id, directoryHint: .isDirectory)
-                .appending(
-                    path: variant.revision,
-                    directoryHint: .isDirectory
-                )
-                .appending(path: file.path)
-            try FileManager.default.createDirectory(
-                at: destination.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try weights.write(to: destination, options: .atomic)
-            XCTAssertNotNil(ModelStorage.styleWeightsURL(for: id))
-        }
     }
 
     func testInpaintingSafetyCheckerIsDisabledByConstruction() {
         XCTAssertFalse(InpaintingRuntimePolicy.isSafetyCheckerEnabled)
     }
 
-    func testInpaintingRetriesThreeDeterministicSeeds() {
-        XCTAssertEqual(InpaintingRuntimePolicy.generationAttemptCount, 3)
+    func testStandaloneManifestDoesNotRequireSharedCloverResources() {
+        let manifest = InpaintingModelManifest(
+            schemaVersion: 3,
+            model: "neonforestmist/Clover-Image-Tiny-Inpaint",
+            baseModel: "neonforestmist/Clover-Image-Tiny",
+            minimumIOS: "18.0",
+            resolution: [512, 512],
+            resources: manifestResources(for: ["VAEEncoder"])
+                + pipelineManifestResources()
+        )
+
+        XCTAssertTrue(manifest.isValidForInstallation)
+        XCTAssertFalse(
+            manifest.resources.contains {
+                $0.path.hasPrefix("TextEncoder.mlmodelc/")
+                    || $0.path.hasPrefix("VAEDecoder.mlmodelc/")
+            },
+            "Shared Clover resources should not be duplicated in this manifest"
+        )
+    }
+
+    func testStandaloneManifestRequiresCompleteInpaintingModels() {
+        let manifest = InpaintingModelManifest(
+            schemaVersion: 3,
+            model: "neonforestmist/Clover-Image-Tiny-Inpaint",
+            baseModel: "neonforestmist/Clover-Image-Tiny",
+            minimumIOS: "18.0",
+            resolution: [512, 512],
+            resources: manifestResources(for: ["Unet"])
+        )
+
+        XCTAssertFalse(manifest.isValidForInstallation)
+    }
+
+    private func manifestResources(
+        for modelNames: [String]
+    ) -> [InpaintingModelManifest.Resource] {
+        let checksum = String(repeating: "a", count: 64)
+        return modelNames.flatMap { name in
+            [
+                InpaintingModelManifest.Resource(
+                    path: "\(name).mlmodelc/metadata.json",
+                    size: 1,
+                    sha256: checksum
+                ),
+                InpaintingModelManifest.Resource(
+                    path: "\(name).mlmodelc/model.mil",
+                    size: 1,
+                    sha256: checksum
+                ),
+                InpaintingModelManifest.Resource(
+                    path: "\(name).mlmodelc/weights/weight.bin",
+                    size: 1,
+                    sha256: checksum
+                ),
+            ]
+        }
+    }
+
+    private func pipelineManifestResources(
+    ) -> [InpaintingModelManifest.Resource] {
+        let checksum = String(repeating: "b", count: 64)
+        return [
+            "UnetPipeline.mlmodelc/metadata.json",
+            "UnetPipeline.mlmodelc/model0/model.mil",
+            "UnetPipeline.mlmodelc/model0/weights/0-weight.bin",
+            "UnetPipeline.mlmodelc/model1/model.mil",
+            "UnetPipeline.mlmodelc/model1/weights/1-weight.bin",
+        ].map {
+            InpaintingModelManifest.Resource(
+                path: $0,
+                size: 1,
+                sha256: checksum
+            )
+        }
+    }
+
+    func testInpaintingDefaultsUseTorchSampling() {
+        XCTAssertEqual(
+            GenerationSettings.inpaintingDefaults.randomGenerator,
+            .torch
+        )
     }
 
     func testStepCountIsClampedToSafeOnDeviceRange() {
@@ -165,6 +224,63 @@ final class InpaintingTests: XCTestCase {
                 "composite changed an unexpected pixel at index \(index)"
             )
         }
+    }
+
+    func testMaskedImageUsesNeutralConditioningInsideMask() throws {
+        let original = try XCTUnwrap(makeRGBAImage { index in
+            (
+                UInt8((index * 17) % 255),
+                UInt8((index * 31) % 255),
+                UInt8((index * 47) % 255),
+                255
+            )
+        })
+        let mask = try XCTUnwrap(makeMaskImage())
+        let masked = try XCTUnwrap(
+            InpaintingImageComposer.maskedImage(from: original, mask: mask)
+        )
+
+        let originalPixels = try XCTUnwrap(rgbaPixels(original))
+        let maskedPixels = try XCTUnwrap(rgbaPixels(masked))
+        let maskPixels = try XCTUnwrap(grayPixels(mask))
+
+        for index in 0..<maskPixels.count {
+            let offset = index * 4
+            if maskPixels[index] >= 128 {
+                XCTAssertEqual(
+                    Array(maskedPixels[offset..<offset + 4]),
+                    [128, 128, 128, 255],
+                    "masked pixel must normalize to zero in the Core ML VAE"
+                )
+            } else {
+                XCTAssertEqual(
+                    Array(maskedPixels[offset..<offset + 4]),
+                    Array(originalPixels[offset..<offset + 4]),
+                    "conditioning changed an unmasked pixel at index \(index)"
+                )
+            }
+        }
+    }
+
+    func testConditioningMaskExpansionKeepsOriginalCenterAndAddsContext() throws {
+        let mask = try XCTUnwrap(
+            makeMaskImage(
+                width: 64,
+                height: 64,
+                maskRect: CGRect(x: 28, y: 28, width: 8, height: 8)
+            )
+        )
+        let expanded = try XCTUnwrap(
+            InpaintingImageComposer.expandedConditioningMask(mask, radius: 6)
+        )
+        let originalPixels = try XCTUnwrap(grayPixels(mask))
+        let expandedPixels = try XCTUnwrap(grayPixels(expanded))
+        XCTAssertGreaterThan(
+            expandedPixels.filter { $0 >= 128 }.count,
+            originalPixels.filter { $0 >= 128 }.count
+        )
+        XCTAssertGreaterThanOrEqual(expandedPixels[32 * 64 + 32], 128)
+        XCTAssertEqual(expandedPixels[0], 0)
     }
 
     func testSmallMaskUsesFocusedInferenceCrop() throws {
@@ -228,6 +344,15 @@ final class InpaintingTests: XCTestCase {
                 Array(originalPixels[offset..<offset + 4])
             )
         }
+        let paintedIndex = try XCTUnwrap(
+            maskPixels.firstIndex(where: { $0 >= 128 })
+        )
+        let paintedOffset = paintedIndex * 4
+        XCTAssertEqual(
+            Array(outputPixels[paintedOffset..<paintedOffset + 4]),
+            [240, 80, 20, 255],
+            "focused compositing must fully replace the painted region"
+        )
     }
 
     func testInpaintingDefaultsUseStableDPMConfiguration() {
@@ -310,7 +435,7 @@ final class InpaintingTests: XCTestCase {
 
     func testInpaintingDownloadSizeUsesMegabytes() {
         let manifest = InpaintingModelManifest(
-            schemaVersion: 2,
+            schemaVersion: 3,
             model: "test",
             baseModel: "test",
             minimumIOS: "18.0",
@@ -323,17 +448,100 @@ final class InpaintingTests: XCTestCase {
         XCTAssertEqual(manifest.totalSizeInMegabytes, "1,672 MB")
     }
 
+    func testInpaintingRetryStartsWithCleanStagingDirectory() throws {
+        let parent = FileManager.default.temporaryDirectory.appending(
+            path: UUID().uuidString,
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: parent,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: parent) }
+
+        let legacyDirectory = parent.appending(
+            path: InpaintingModelDownloader.legacyStagingDirectoryName,
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: legacyDirectory,
+            withIntermediateDirectories: true
+        )
+        try Data("partial".utf8).write(
+            to: legacyDirectory.appending(path: "weight.bin")
+        )
+
+        let staging = try InpaintingModelDownloader()
+            .prepareStagingDirectory(parentURL: parent)
+
+        XCTAssertEqual(
+            staging.lastPathComponent,
+            InpaintingModelDownloader.stagingDirectoryName
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staging.path))
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: parent.appending(
+                    path: InpaintingModelDownloader.legacyStagingDirectoryName
+                ).path
+            )
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: staging.appending(path: "weight.bin")),
+            Data("partial".utf8)
+        )
+    }
+
+    func testInpaintingSharedResourceCopyResolvesSymlinks() throws {
+        let root = FileManager.default.temporaryDirectory.appending(
+            path: UUID().uuidString,
+            directoryHint: .isDirectory
+        )
+        let actual = root.appending(path: "actual", directoryHint: .isDirectory)
+        let linked = root.appending(path: "linked", directoryHint: .isDirectory)
+        let destination = root.appending(
+            path: "destination",
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: actual,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try Data("clover".utf8).write(to: actual.appending(path: "vocab.json"))
+        try FileManager.default.createSymbolicLink(
+            at: linked,
+            withDestinationURL: actual
+        )
+
+        try InpaintingModelDownloader().linkOrCopyTree(
+            from: linked,
+            to: destination
+        )
+
+        XCTAssertEqual(
+            try Data(contentsOf: destination.appending(path: "vocab.json")),
+            Data("clover".utf8)
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: destination.appending(path: "actual/vocab.json").path
+            )
+        )
+    }
+
     func testInpaintingDownloadsUsePinnedCoreMLRevision() {
         let manifest = InpaintingModelManifest(
-            schemaVersion: 2,
+            schemaVersion: 3,
             model: "test",
             baseModel: "test",
             minimumIOS: "18.0",
             resolution: [512, 512],
             resources: [
                 .init(
-                    path: "Unet.mlmodelc/model.mil",
-                    remotePath: "hq-v3/Unet.mlmodelc/model.mil",
+                    path: "UnetPipeline.mlmodelc/metadata.json",
+                    remotePath: "pipeline-v1/UnetPipeline.mlmodelc/metadata.json",
                     size: 1,
                     sha256: "test"
                 )
@@ -352,7 +560,7 @@ final class InpaintingTests: XCTestCase {
         )
         XCTAssertTrue(
             manifest.downloadURL(for: manifest.resources[0]).absoluteString.contains(
-                "hq-v3/Unet.mlmodelc/model.mil"
+                "pipeline-v1/UnetPipeline.mlmodelc/metadata.json"
             )
         )
     }
@@ -374,7 +582,7 @@ final class InpaintingTests: XCTestCase {
         try "old-revision\n".write(to: marker, atomically: true, encoding: .utf8)
         XCTAssertFalse(InpaintingModelManifest.isRevisionCurrent(at: directory))
 
-        try (InpaintingModelManifest.repositoryRevision + "\n").write(
+        try (InpaintingModelManifest.installationVersion + "\n").write(
             to: marker,
             atomically: true,
             encoding: .utf8
@@ -452,7 +660,8 @@ final class InpaintingTests: XCTestCase {
 
     private func makeMaskImage(
         width: Int = 8,
-        height: Int = 8
+        height: Int = 8,
+        maskRect: CGRect = CGRect(x: 2, y: 2, width: 4, height: 4)
     ) -> CGImage? {
         guard let context = CGContext(
             data: nil,
@@ -469,7 +678,7 @@ final class InpaintingTests: XCTestCase {
         context.setFillColor(gray: 0, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         context.setFillColor(gray: 1, alpha: 1)
-        context.fill(CGRect(x: 2, y: 2, width: 4, height: 4))
+        context.fill(maskRect)
         return context.makeImage()
     }
 

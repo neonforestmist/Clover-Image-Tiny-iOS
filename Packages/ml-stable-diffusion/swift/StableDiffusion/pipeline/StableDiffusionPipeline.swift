@@ -298,6 +298,7 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
         if reduceMemory {
             encoder?.unloadResources()
         }
+
         let timestepStrength: Float? = config.mode == .imageToImage ? config.strength : nil
         
         // Convert cgImage for ControlNet into MLShapedArray

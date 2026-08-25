@@ -102,6 +102,7 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         settings.stepCount = 20
         settings.guidanceScale = 6.0
         settings.scheduler = .dpmSolver
+        settings.randomGenerator = .torch
         settings.livePreviewEnabled = true
         settings.previewInterval = 5
         return settings
@@ -254,6 +255,39 @@ struct GenerationSettings: Codable, Equatable, Sendable {
         prompt = trimmedContent.isEmpty ? "\(prefix), " : "\(prefix), \(trimmedContent)"
     }
 
+    func promptBody(removingStyleTriggers triggers: [String]) -> String {
+        triggers.reduce(prompt) { content, trigger in
+            Self.removingTriggerPrefixPreservingBody(trigger, from: content)
+        }
+    }
+
+    mutating func setPromptBody(
+        _ body: String,
+        styleTriggers triggers: [String]
+    ) {
+        let cleanedTriggers = triggers.filter { !$0.isEmpty }.uniqued()
+        guard !cleanedTriggers.isEmpty else {
+            prompt = body
+            return
+        }
+        let prefix = cleanedTriggers.joined(separator: ", ")
+        prompt = body.isEmpty ? "\(prefix), " : "\(prefix), \(body)"
+    }
+
+    mutating func adopt(_ snapshot: GenerationSnapshot) {
+        prompt = snapshot.prompt
+        negativePrompt = snapshot.negativePrompt
+        stepCount = snapshot.stepCount
+        guidanceScale = snapshot.guidanceScale
+        seed = snapshot.seed
+        scheduler = snapshot.scheduler
+        randomGenerator = snapshot.randomGenerator
+        computeTarget = snapshot.computeTarget
+        modelID = snapshot.modelID ?? "base"
+        styleIDs = snapshot.styleIDs ?? []
+        styleStrengths = snapshot.styleStrengths ?? [:]
+    }
+
     mutating func setStyleStrength(_ value: Double, for id: String) {
         guard styleIDs.contains(id) else { return }
         styleStrengths[id] = min(max(value, 0), 1.5)
@@ -301,6 +335,24 @@ struct GenerationSettings: Codable, Equatable, Sendable {
 
         return String(leadingTrimmed[range.upperBound...])
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func removingTriggerPrefixPreservingBody(
+        _ trigger: String,
+        from prompt: String
+    ) -> String {
+        let leadingTrimmed = prompt.drop { $0.isWhitespace }
+        guard let range = leadingTrimmed.range(
+            of: "\(trigger),",
+            options: [.anchored, .caseInsensitive]
+        ) else {
+            return prompt
+        }
+        var remainder = String(leadingTrimmed[range.upperBound...])
+        if remainder.first == " " {
+            remainder.removeFirst()
+        }
+        return remainder
     }
 }
 

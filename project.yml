@@ -36,6 +36,10 @@ targets:
         UIFileSharingEnabled: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        CFBundleURLTypes:
+          - CFBundleURLName: com.lukaslozada.Clover
+            CFBundleURLSchemes:
+              - clover
         UILaunchScreen:
           UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:

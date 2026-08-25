@@ -2,6 +2,9 @@ import Foundation
 
 enum ModelStorage {
     private static let installKeyPrefix = "clover-model-install-"
+    private static let unusedCommonComponents: Set<String> = [
+        "SafetyChecker.mlmodelc",
+    ]
 
     /// Prefix marking a model the user side-loaded via the Files app rather
     /// than one downloaded from the catalog.
@@ -13,6 +16,7 @@ enum ModelStorage {
         let name: String
         let weightsURL: URL
         let fileSize: Int64?
+        let trigger: String?
 
         var requiresClover: Bool {
             true
@@ -22,6 +26,10 @@ enum ModelStorage {
             guard let fileSize else { return "Clover LoRA" }
             return "Clover LoRA · \(fileSize.formatted(.byteCount(style: .file)))"
         }
+    }
+
+    private struct ImportedStyleMetadata: Codable {
+        var trigger: String?
     }
 
     static let rootURL: URL = {
@@ -73,19 +81,25 @@ enum ModelStorage {
 
     static func isInpaintingResourcesDirectory(_ url: URL) -> Bool {
         let required = [
-            "TextEncoder.mlmodelc",
-            "VAEEncoder.mlmodelc",
-            "VAEDecoder.mlmodelc",
-            "adapter-schema.json",
+            "TextEncoder.mlmodelc/model.mil",
+            "VAEEncoder.mlmodelc/model.mil",
+            "VAEDecoder.mlmodelc/model.mil",
             "vocab.json",
             "merges.txt",
         ]
-        let hasUnet = FileManager.default.fileExists(
-            atPath: url
-                .appending(path: "Unet.mlmodelc")
-                .path
-        )
-        return hasUnet && required.allSatisfy {
+        let hasSingleUnet = [
+            "UnetPipeline.mlmodelc",
+            "Unet.mlmodelc",
+        ].contains {
+            FileManager.default.fileExists(atPath: url.appending(path: $0).path)
+        }
+        let hasChunkedUnet = ["UnetChunk1.mlmodelc", "UnetChunk2.mlmodelc"]
+            .allSatisfy {
+                FileManager.default.fileExists(
+                    atPath: url.appending(path: $0).path
+                )
+            }
+        return (hasSingleUnet || hasChunkedUnet) && required.allSatisfy {
             FileManager.default.fileExists(
                 atPath: url.appending(path: $0).path
             )
@@ -146,7 +160,8 @@ enum ModelStorage {
                             + filename.lowercased(),
                         name: entry.deletingPathExtension().lastPathComponent,
                         weightsURL: entry,
-                        fileSize: Int64(fileSize)
+                        fileSize: Int64(fileSize),
+                        trigger: importedTrigger(for: entry)
                     )
                 )
             }
@@ -154,6 +169,49 @@ enum ModelStorage {
         return styles.sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
+    }
+
+    static func setImportedTrigger(
+        _ trigger: String?,
+        for weightsURL: URL
+    ) throws {
+        let cleaned = trigger.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: ","))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let metadataURL = importedMetadataURL(for: weightsURL)
+        if cleaned?.isEmpty != false {
+            if FileManager.default.fileExists(atPath: metadataURL.path) {
+                try FileManager.default.removeItem(at: metadataURL)
+            }
+            return
+        }
+        let data = try JSONEncoder().encode(
+            ImportedStyleMetadata(trigger: cleaned)
+        )
+        try data.write(to: metadataURL, options: .atomic)
+    }
+
+    private static func importedTrigger(for weightsURL: URL) -> String? {
+        let metadataURL = importedMetadataURL(for: weightsURL)
+        guard let data = try? Data(contentsOf: metadataURL),
+              let metadata = try? JSONDecoder().decode(
+                  ImportedStyleMetadata.self,
+                  from: data
+              ) else {
+            return nil
+        }
+        let cleaned = metadata.trigger?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        return cleaned?.isEmpty == false ? cleaned : nil
+    }
+
+    private static func importedMetadataURL(for weightsURL: URL) -> URL {
+        weightsURL
+            .deletingPathExtension()
+            .appendingPathExtension("clover-style.json")
     }
 
     static func sharedURL(revision: String) -> URL {
@@ -180,6 +238,93 @@ enum ModelStorage {
         }
         for entry in entries where entry.lastPathComponent != revision {
             try? FileManager.default.removeItem(at: entry)
+        }
+    }
+
+    /// Clover intentionally constructs both generation pipelines without a
+    /// safety checker. Older catalogs nevertheless installed its 580 MB model,
+    /// which can leave too little room for Core ML to compile the inpainting
+    /// execution plan. Reclaim that unused model and abandoned Core ML plan
+    /// staging bundles; both are private, rebuildable app data.
+    static func reclaimUnusedRuntimeFiles() {
+        let fileManager = FileManager.default
+        if let revisions = try? fileManager.contentsOfDirectory(
+            at: sharedRootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for revision in revisions {
+                for component in unusedCommonComponents {
+                    try? fileManager.removeItem(
+                        at: revision.appending(path: component)
+                    )
+                }
+            }
+        }
+
+        let inpaintingURL = inpaintingResourcesURL
+        let hasStatelessChunks = ["UnetChunk1.mlmodelc", "UnetChunk2.mlmodelc"]
+            .allSatisfy {
+                fileManager.fileExists(
+                    atPath: inpaintingURL.appending(path: $0).path
+                )
+            }
+        let statelessMigrationMarker = inpaintingURL.appending(
+            path: ".clover-stateless-runtime-cleaned"
+        )
+        if hasStatelessChunks,
+           !fileManager.fileExists(atPath: statelessMigrationMarker.path) {
+            // The stateless release replaces the former full stateful U-Net.
+            // Keeping both consumes another ~821 MB on the phone and can leave
+            // Core ML without enough room to build the new execution plans.
+            try? fileManager.removeItem(
+                at: inpaintingURL.appending(path: "Unet.mlmodelc")
+            )
+        }
+
+        guard let caches = fileManager.urls(
+            for: .cachesDirectory,
+            in: .userDomainMask
+        ).first else { return }
+        let bundleCache = caches
+            .appending(path: Bundle.main.bundleIdentifier ?? "", directoryHint: .isDirectory)
+            .appending(path: "com.apple.e5rt.e5bundlecache", directoryHint: .isDirectory)
+        if hasStatelessChunks,
+           !fileManager.fileExists(atPath: statelessMigrationMarker.path) {
+            // Plans compiled for the stateful model are incompatible with the
+            // stateless chunks and are entirely rebuildable.
+            try? fileManager.removeItem(at: bundleCache)
+            try? "cleaned\n".write(
+                to: statelessMigrationMarker,
+                atomically: true,
+                encoding: .utf8
+            )
+            return
+        }
+        guard let enumerator = fileManager.enumerator(
+            at: bundleCache,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        var abandonedBundles: [URL] = []
+        for case let url as URL in enumerator
+        where url.lastPathComponent.contains(".tmp.") {
+            abandonedBundles.append(url)
+            enumerator.skipDescendants()
+        }
+        for url in abandonedBundles {
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
+    static func runtimeCommonFiles(
+        _ files: [ModelCatalog.ResourceFile]
+    ) -> [ModelCatalog.ResourceFile] {
+        files.filter { file in
+            guard let component = file.path.split(separator: "/").first else {
+                return false
+            }
+            return !unusedCommonComponents.contains(String(component))
         }
     }
 
@@ -341,7 +486,6 @@ enum ModelStorage {
             "TextEncoder.mlmodelc",
             "VAEDecoder.mlmodelc",
             "Unet.mlmodelc",
-            "SafetyChecker.mlmodelc",
             "adapter-schema.json",
             "vocab.json",
             "merges.txt",

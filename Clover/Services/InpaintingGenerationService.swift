@@ -40,10 +40,13 @@ struct InpaintingPreparedInput: @unchecked Sendable {
 
 enum InpaintingImageComposer {
     static let inferenceSize = 512
+    // Retained for compatibility with older installed model manifests and
+    // geometry helper tests. Focused inpainting uses crop context instead.
+    static let conditioningMaskExpansion = 64
 
-    /// Gives small edits enough latent resolution by cropping a square region
-    /// around the mask before inference. The crop still includes generous
-    /// surrounding context and is mapped back through `compositeFocused`.
+    /// Gives a small painted region enough latent resolution by running a
+    /// square crop that includes 96 points of source context on every side.
+    /// This matches the focused-mask flow used by the Diffusers demo.
     static func prepareFocusedInput(
         image: CGImage,
         mask: CGImage
@@ -61,6 +64,7 @@ enum InpaintingImageComposer {
             width: image.width,
             height: image.height
         )
+
         let largestMaskSide = max(bounds.width, bounds.height)
         let cropSide = min(
             min(image.width, image.height),
@@ -113,7 +117,10 @@ enum InpaintingImageComposer {
     }
 
     /// Returns the conditioning image expected by a Stable Diffusion inpaint
-    /// U-Net: original pixels outside the mask and black pixels inside it.
+    /// U-Net: original pixels outside the mask and neutral gray inside it.
+    /// Diffusers zeros the already-normalized [-1, 1] image tensor. Clover's
+    /// VAE performs that normalization, so a zero-valued tensor is represented
+    /// by 0.5 gray (128) in the pixel-space conditioning image.
     static func maskedImage(
         from image: CGImage,
         mask: CGImage
@@ -126,12 +133,69 @@ enum InpaintingImageComposer {
         }
         for index in 0..<(original.width * original.height) {
             if maskBuffer.bytes[index] >= 128 {
-                original.bytes[index * 4] = 0
-                original.bytes[index * 4 + 1] = 0
-                original.bytes[index * 4 + 2] = 0
+                original.bytes[index * 4] = 128
+                original.bytes[index * 4 + 1] = 128
+                original.bytes[index * 4 + 2] = 128
             }
         }
         return original.makeImage()
+    }
+
+    /// Expands only the mask supplied to the inpainting model. Small painted
+    /// regions otherwise leave too little latent-space context for the model
+    /// to form a requested object. Final compositing still uses the user's
+    /// original mask, so pixels outside their selection remain untouched.
+    static func expandedConditioningMask(
+        _ mask: CGImage,
+        radius: Int = conditioningMaskExpansion
+    ) -> CGImage? {
+        guard radius > 0, let source = grayBuffer(for: mask) else {
+            return mask
+        }
+        let width = source.width
+        let height = source.height
+        var horizontal = [UInt8](repeating: 0, count: width * height)
+        var expanded = [UInt8](repeating: 0, count: width * height)
+
+        for y in 0..<height {
+            for x in 0..<width {
+                let lower = max(x - radius, 0)
+                let upper = min(x + radius, width - 1)
+                var value: UInt8 = 0
+                for sourceX in lower...upper {
+                    value = max(value, source.bytes[y * width + sourceX])
+                }
+                horizontal[y * width + x] = value
+            }
+        }
+        for y in 0..<height {
+            let lower = max(y - radius, 0)
+            let upper = min(y + radius, height - 1)
+            for x in 0..<width {
+                var value: UInt8 = 0
+                for sourceY in lower...upper {
+                    value = max(value, horizontal[sourceY * width + x])
+                }
+                expanded[y * width + x] = value
+            }
+        }
+
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ), let destination = context.data?.assumingMemoryBound(to: UInt8.self)
+        else {
+            return nil
+        }
+        expanded.withUnsafeBufferPointer { source in
+            destination.update(from: source.baseAddress!, count: expanded.count)
+        }
+        return context.makeImage()
     }
 
     /// Keeps the original pixels outside the white mask. This prevents a
@@ -139,7 +203,8 @@ enum InpaintingImageComposer {
     static func composite(
         original image: CGImage,
         generated: CGImage,
-        mask: CGImage
+        mask: CGImage,
+        featherRadius: Int = 0
     ) -> CGImage? {
         guard let output = rgbaBuffer(for: generated),
               let original = rgbaBuffer(for: image),
@@ -150,13 +215,22 @@ enum InpaintingImageComposer {
               output.height == maskBuffer.height else {
             return nil
         }
-        for index in 0..<(output.width * output.height) {
-            if maskBuffer.bytes[index] < 128 {
-                output.bytes[index * 4] = original.bytes[index * 4]
-                output.bytes[index * 4 + 1] = original.bytes[index * 4 + 1]
-                output.bytes[index * 4 + 2] = original.bytes[index * 4 + 2]
-                output.bytes[index * 4 + 3] = original.bytes[index * 4 + 3]
-            }
+        let compositingMask = featherRadius > 1
+            ? feathered(maskBuffer, radius: featherRadius)
+            : maskBuffer
+        blend(
+            output: output,
+            original: original,
+            generated: output,
+            mask: compositingMask
+        )
+
+        // The inward feather deliberately returns zero outside the white
+        // mask. Preserve the source alpha there as well, so transparent input
+        // images do not acquire an opaque halo at the edit boundary.
+        for index in 0..<(output.width * output.height)
+        where maskBuffer.bytes[index] < 128 {
+            output.bytes[index * 4 + 3] = original.bytes[index * 4 + 3]
         }
         return output.makeImage()
     }
@@ -168,7 +242,7 @@ enum InpaintingImageComposer {
         generated: CGImage,
         mask: CGImage,
         cropRect: CGRect,
-        featherRadius: Int = 10
+        featherRadius: Int = 0
     ) -> CGImage? {
         let fullRect = CGRect(
             x: 0,
@@ -177,18 +251,12 @@ enum InpaintingImageComposer {
             height: image.height
         )
         if cropRect.equalTo(fullRect) {
-            guard let output = rgbaBuffer(for: generated),
-                  let original = rgbaBuffer(for: image),
-                  let maskBuffer = grayBuffer(for: mask) else {
-                return nil
-            }
-            blend(
-                output: output,
-                original: original,
-                generated: output,
-                mask: feathered(maskBuffer, radius: featherRadius)
+            return composite(
+                original: image,
+                generated: generated,
+                mask: mask,
+                featherRadius: featherRadius
             )
-            return output.makeImage()
         }
 
         let cropWidth = Int(cropRect.width)
@@ -206,13 +274,15 @@ enum InpaintingImageComposer {
 
         let originX = Int(cropRect.origin.x)
         let originY = Int(cropRect.origin.y)
-        let featheredMask = feathered(maskBuffer, radius: featherRadius)
+        let compositingMask = featherRadius > 1
+            ? feathered(maskBuffer, radius: featherRadius)
+            : maskBuffer
         for cropY in 0..<cropHeight {
             let imageY = originY + cropY
             for cropX in 0..<cropWidth {
                 let imageX = originX + cropX
                 let imageIndex = imageY * image.width + imageX
-                let alpha = Int(featheredMask.bytes[imageIndex])
+                let alpha = Int(compositingMask.bytes[imageIndex])
                 guard alpha > 0 else { continue }
                 let cropIndex = cropY * cropWidth + cropX
                 for channel in 0..<3 {
@@ -222,10 +292,17 @@ enum InpaintingImageComposer {
                     )
                     output.bytes[imageIndex * 4 + channel] = UInt8(
                         (generatedValue * alpha
-                            + originalValue * (255 - alpha)
+                        + originalValue * (255 - alpha)
                             + 127) / 255
                     )
                 }
+                let generatedAlpha = Int(generatedBuffer.bytes[cropIndex * 4 + 3])
+                let originalAlpha = Int(output.bytes[imageIndex * 4 + 3])
+                output.bytes[imageIndex * 4 + 3] = UInt8(
+                    (generatedAlpha * alpha
+                        + originalAlpha * (255 - alpha)
+                        + 127) / 255
+                )
             }
         }
         return output.makeImage()
@@ -500,31 +577,29 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         cancellation: GenerationCancellationToken,
         progress: @escaping @Sendable (GenerationUpdate) -> Void
     ) throws -> GenerationResult {
+        // Match the Diffusers inpaint demo: focus a 512px inference canvas
+        // around the painted region while retaining 96 points of surrounding
+        // source context. A small mask otherwise occupies too few latent
+        // pixels in a full-frame pass and the model recreates the background
+        // instead of the requested replacement.
         guard let prepared = InpaintingImageComposer.prepareFocusedInput(
             image: request.image,
             mask: request.mask
         ),
-        let maskedImage = InpaintingImageComposer.maskedImage(
-            from: prepared.image,
-            mask: prepared.mask
-        ) else {
+            let maskedImage = InpaintingImageComposer.maskedImage(
+                from: prepared.image,
+                mask: prepared.mask
+            ) else {
             throw CloverPipelineError.incompatibleResources
         }
 
         let configuration = MLModelConfiguration()
         configuration.computeUnits = inpaintingComputeUnits(for: settings.computeTarget)
-        let styleWeights = try settings.styleIDs.map { id in
-            guard let url = ModelStorage.styleWeightsURL(for: id) else {
-                throw GenerationError.missingResources
-            }
-            return LoRAAdapter.WeightedWeights(
-                url: url,
-                scale: Float(settings.styleStrength(for: id))
-            )
-        }
         let pipeline = try CloverPipelineFactory.makeInpainting(
             resourcesURL: resourcesURL,
-            styleWeights: styleWeights,
+            // Create LoRAs target a different U-Net and must not be applied to
+            // the standalone inpainting checkpoint.
+            styleWeights: [],
             configuration: configuration
         )
         let requestedStepCount = InpaintingGenerationLimits.clampedStepCount(
@@ -553,133 +628,95 @@ final class CoreMLInpaintingService: @unchecked Sendable {
 
         defer { pipeline.unloadResources() }
         var storedPreviews: [GeneratedPreviewFrame] = []
-        var images: [CGImage] = []
-        var resolvedSeed = settings.seed
         var reportedProgress = 0.0
-
-        // A small subset of seeds can collapse this compact 9-channel U-Net
-        // to an invalid masked region. Try up to three deterministic seeds
-        // instead of making the user redraw their mask.
-        for attempt in 0..<InpaintingRuntimePolicy.generationAttemptCount {
-            generation.seed = settings.seed &+ UInt32(attempt)
-            var attemptPreviews: [GeneratedPreviewFrame] = []
-            let generated = try pipeline.generateImages(
-                configuration: generation
-            ) { update in
-                let schedulerStepCount = max(update.stepCount, 1)
-                let schedulerStep = min(
-                    max(update.step + 1, 1),
-                    schedulerStepCount
-                )
-                let completedStep = GenerationStepMapper.visibleStep(
-                    updateStep: update.step,
-                    requestedStepCount: requestedStepCount
-                )
-                let imageProgress = Double(schedulerStep)
-                    / Double(schedulerStepCount)
-                let previewInterval = min(max(settings.previewInterval, 1), 10)
-                let shouldPreview = InpaintingPreviewPolicy.shouldRender(
-                    enabled: settings.livePreviewEnabled,
-                    completedStep: completedStep,
-                    stepCount: requestedStepCount,
-                    interval: previewInterval
-                )
-                let renderedPreview = shouldPreview
-                    ? autoreleasepool {
-                        LatentPreviewRenderer.render(
-                            update.currentLatentSamples.first
-                        )
-                    }
-                    : nil
-                let previewImage = renderedPreview.flatMap { image in
-                    InpaintingImageComposer.compositeFocused(
-                        original: request.image,
-                        generated: image,
-                        mask: request.mask,
-                        cropRect: prepared.cropRect
-                    )
-                } ?? renderedPreview
-                let preview = previewImage.map { image in
-                    GenerationPreview(
-                        cgImage: image,
-                        step: completedStep,
-                        stepCount: requestedStepCount,
-                        imageIndex: 0
-                    )
-                }
-                if completedStep < requestedStepCount,
-                   completedStep.isMultiple(of: previewInterval),
-                   let previewImage,
-                   let jpegData = autoreleasepool(invoking: {
-                       UIImage(cgImage: previewImage).jpegData(
-                           compressionQuality: 0.82
-                       )
-                   }) {
-                    attemptPreviews.append(
-                        GeneratedPreviewFrame(
-                            jpegData: jpegData,
-                            step: completedStep,
-                            stepCount: requestedStepCount,
-                            imageIndex: 0
-                        )
-                    )
-                }
-                // Never move backward if an automatic retry starts. Denoising
-                // stops at 90%; decode, validation, compositing, and Library
-                // persistence own the final portion of the progress bar.
-                reportedProgress = max(
-                    reportedProgress,
-                    min(max(imageProgress * 0.9, 0), 0.9)
-                )
-                progress(
-                    GenerationUpdate(
-                        progress: reportedProgress,
-                        preview: preview,
-                        activity: completedStep >= requestedStepCount
-                            ? .decoding(imageIndex: 0, imageCount: 1)
-                            : attempt > 0
-                            ? .retryingEdit(
-                                attempt: attempt + 1,
-                                attemptCount: InpaintingRuntimePolicy.generationAttemptCount
-                            )
-                            : .denoising(
-                                step: completedStep,
-                                stepCount: requestedStepCount,
-                                imageIndex: 0,
-                                imageCount: 1
-                            )
-                    )
-                )
-                return !cancellation.isCancelled
-            }
-            guard !cancellation.isCancelled else {
-                throw GenerationError.cancelled
-            }
-            progress(
-                GenerationUpdate(
-                    progress: 0.96,
-                    preview: nil,
-                    activity: .compositing
-                )
+        let generated = try pipeline.generateImages(
+            configuration: generation
+        ) { update in
+            let schedulerStepCount = max(update.stepCount, 1)
+            let schedulerStep = min(max(update.step + 1, 1), schedulerStepCount)
+            let completedStep = GenerationStepMapper.visibleStep(
+                updateStep: update.step,
+                requestedStepCount: requestedStepCount
             )
-            images = generated.compactMap { optionalImage -> CGImage? in
-                guard let image = optionalImage else { return nil }
-                guard InpaintingImageComposer.hasUsableMaskedContent(
-                    generated: image,
-                    mask: prepared.mask
-                ) else { return nil }
-                return InpaintingImageComposer.compositeFocused(
+            let imageProgress = Double(schedulerStep) / Double(schedulerStepCount)
+            let previewInterval = min(max(settings.previewInterval, 1), 10)
+            let shouldPreview = InpaintingPreviewPolicy.shouldRender(
+                enabled: settings.livePreviewEnabled,
+                completedStep: completedStep,
+                stepCount: requestedStepCount,
+                interval: previewInterval
+            )
+            let renderedPreview = shouldPreview
+                ? autoreleasepool {
+                    LatentPreviewRenderer.render(update.currentLatentSamples.first)
+                }
+                : nil
+            let previewImage = renderedPreview.flatMap { image in
+                InpaintingImageComposer.compositeFocused(
                     original: request.image,
                     generated: image,
                     mask: request.mask,
                     cropRect: prepared.cropRect
-                ) ?? image
+                )
+            } ?? renderedPreview
+            let preview = previewImage.map { image in
+                GenerationPreview(
+                    cgImage: image,
+                    step: completedStep,
+                    stepCount: requestedStepCount,
+                    imageIndex: 0
+                )
             }
-            if !images.isEmpty {
-                storedPreviews = attemptPreviews
-                resolvedSeed = generation.seed
-                break
+            if completedStep < requestedStepCount,
+               completedStep.isMultiple(of: previewInterval),
+               let previewImage,
+               let jpegData = autoreleasepool(invoking: {
+                   UIImage(cgImage: previewImage).jpegData(compressionQuality: 0.82)
+               }) {
+                storedPreviews.append(
+                    GeneratedPreviewFrame(
+                        jpegData: jpegData,
+                        step: completedStep,
+                        stepCount: requestedStepCount,
+                        imageIndex: 0
+                    )
+                )
             }
+            reportedProgress = min(max(imageProgress * 0.9, 0), 0.9)
+            progress(
+                GenerationUpdate(
+                    progress: reportedProgress,
+                    preview: preview,
+                    activity: completedStep >= requestedStepCount
+                        ? .decoding(imageIndex: 0, imageCount: 1)
+                        : .denoising(
+                            step: completedStep,
+                            stepCount: requestedStepCount,
+                            imageIndex: 0,
+                            imageCount: 1
+                        )
+                )
+            )
+            return !cancellation.isCancelled
+        }
+        guard !cancellation.isCancelled else {
+            throw GenerationError.cancelled
+        }
+        progress(
+            GenerationUpdate(
+                progress: 0.96,
+                preview: nil,
+                activity: .compositing
+            )
+        )
+        let images = generated.compactMap { optionalImage -> CGImage? in
+            guard let image = optionalImage else { return nil }
+            return InpaintingImageComposer.compositeFocused(
+                original: request.image,
+                generated: image,
+                mask: request.mask,
+                cropRect: prepared.cropRect
+            ) ?? image
         }
         guard !images.isEmpty else {
             throw GenerationError.unusableInpaintingOutput
@@ -689,7 +726,7 @@ final class CoreMLInpaintingService: @unchecked Sendable {
                 GeneratedImage(cgImage: image, imageIndex: index)
             },
             previewFrames: storedPreviews,
-            resolvedSeed: resolvedSeed
+            resolvedSeed: settings.seed
         )
     }
 

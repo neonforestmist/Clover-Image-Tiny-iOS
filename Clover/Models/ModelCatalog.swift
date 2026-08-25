@@ -56,9 +56,9 @@ struct ModelCatalog: Codable, Equatable, Sendable {
 
         var iconAssetName: String {
             switch id {
-            case "monet": "StyleIconMonet"
-            case "pointillism": "StyleIconPointillism"
-            case "watercolor-anime": "StyleIconWatercolorAnime"
+            case "monet": "Monet_lora_icon"
+            case "pointillism": "Pointillism_lora_icon"
+            case "watercolor-anime": "Watercolor_anime_lora_icon"
             default: "StyleIconClover"
             }
         }

@@ -8,42 +8,26 @@ final class CloverUITests: XCTestCase {
         app.launchArguments = ["-ui-testing-reset", "-ui-testing-preview"]
         app.launch()
 
-        let tabs = app.tabBars.buttons
-        XCTAssertTrue(tabs["Create"].waitForExistence(timeout: 5))
-        XCTAssertTrue(tabs["Inpainting"].exists)
-        XCTAssertTrue(tabs["Library"].exists)
+        // Compact iPhone layouts use the system tab bar; larger layouts may
+        // promote the same destinations to a native sidebar.
+        XCTAssertTrue(app.otherElements["output-canvas"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Create"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Inpaint"].exists)
+        XCTAssertTrue(app.buttons["Models"].exists)
+        XCTAssertTrue(app.buttons["Library"].exists)
 
-        tabs["Inpainting"].tap()
+        app.goToCloverDestination("Inpaint")
         XCTAssertTrue(
-            app.navigationBars["Inpainting"].waitForExistence(timeout: 3)
+            app.navigationBars["Inpaint"].waitForExistence(timeout: 3)
         )
         XCTAssertTrue(app.buttons["inpainting-source-picker"].exists)
         XCTAssertTrue(app.otherElements["inpainting-model-status"].exists)
-        XCTAssertTrue(app.buttons["inpainting-generate-button"].exists)
-
-        let settings = app.buttons["inpainting-settings-button"]
-        XCTAssertTrue(settings.exists)
-        settings.tap()
         XCTAssertTrue(
-            app.navigationBars["Inpainting Settings"]
-                .waitForExistence(timeout: 3)
+            app.scrollViews.otherElements["inpainting-model-status"].exists,
+            "The model prerequisite should scroll with the Inpaint content"
         )
-        XCTAssertTrue(app.steppers["inpainting-steps-stepper"].exists)
-        XCTAssertTrue(app.otherElements["inpainting-steps-slider"].exists)
-        XCTAssertTrue(app.sliders["inpainting-guidance-slider"].exists)
-        let livePreview = app.switches["inpainting-live-preview-toggle"]
-        for _ in 0..<3 where !livePreview.exists {
-            app.swipeUp()
-        }
-        XCTAssertTrue(livePreview.waitForExistence(timeout: 3))
-        let previewInterval = app.otherElements[
-            "inpainting-preview-interval-slider"
-        ]
-        for _ in 0..<3 where !previewInterval.exists {
-            app.swipeUp()
-        }
-        XCTAssertTrue(previewInterval.waitForExistence(timeout: 3))
-        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["inpainting-generate-button"].exists)
+        XCTAssertTrue(app.buttons["inpainting-open-models"].exists)
     }
 
     @MainActor
@@ -52,30 +36,30 @@ final class CloverUITests: XCTestCase {
         app.launchArguments = ["-ui-testing-reset", "-ui-testing-preview"]
         app.launch()
 
-        let models = app.buttons["model-picker-button"]
-        XCTAssertTrue(models.waitForExistence(timeout: 5))
-        models.tap()
+        app.goToCloverDestination("Models")
         XCTAssertTrue(
-            app.navigationBars["Models & Styles"]
+            app.navigationBars["Models"]
                 .waitForExistence(timeout: 3)
         )
         XCTAssertTrue(app.otherElements["model-base"].exists)
 
-        let addMonet = app.buttons["Add Monet"]
-        XCTAssertTrue(addMonet.waitForExistence(timeout: 3))
-        addMonet.tap()
+        XCTAssertTrue(app.staticTexts["Installed"].exists)
+        XCTAssertFalse(app.buttons["Load Monet"].exists)
         XCTAssertFalse(app.buttons["Remove Download"].exists)
 
         let manageMonet = app.buttons["manage-download-monet"]
         XCTAssertTrue(manageMonet.waitForExistence(timeout: 3))
 
-        app.buttons["Done"].tap()
-
+        app.goToCloverDestination("Create")
         let parameters = app.buttons["parameters-button"]
         XCTAssertTrue(parameters.waitForExistence(timeout: 5))
         parameters.tap()
 
         XCTAssertTrue(app.navigationBars["Parameters"].waitForExistence(timeout: 3))
+        let monetToggle = app.switches["style-mix-enabled-monet"]
+        XCTAssertTrue(monetToggle.waitForExistence(timeout: 3))
+        monetToggle.tap()
+        XCTAssertTrue(app.sliders["style-weight-monet"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.steppers["steps-stepper"].exists)
         XCTAssertTrue(app.otherElements["steps-slider"].exists)
         XCTAssertTrue(app.sliders["guidance-slider"].exists)
@@ -96,11 +80,33 @@ final class CloverUITests: XCTestCase {
         ).tap()
         app.buttons["Done"].tap()
 
+        XCTAssertTrue(
+            app.buttons["Monet Style trigger"].waitForExistence(timeout: 3)
+        )
+
         let prompt = app.textViews["prompt-field"]
+        app.reveal(prompt)
         XCTAssertTrue(prompt.waitForExistence(timeout: 3))
         prompt.tap()
         prompt.typeText("a tiny greenhouse at night")
-        app.buttons["dismiss-keyboard-button"].tap()
+        XCTAssertEqual(
+            prompt.value as? String,
+            "a tiny greenhouse at night"
+        )
+        assertEditorIsAboveKeyboard(prompt, in: app)
+        dismissNativeKeyboard(in: app)
+
+        let negativeToggle = app.switches["negative-prompt-toggle"]
+        app.reveal(negativeToggle)
+        XCTAssertTrue(negativeToggle.waitForExistence(timeout: 3))
+        negativeToggle.tap()
+
+        let negativePrompt = app.textViews["negative-prompt-field"]
+        app.reveal(negativePrompt)
+        XCTAssertTrue(negativePrompt.waitForExistence(timeout: 3))
+        negativePrompt.tap()
+        assertEditorIsAboveKeyboard(negativePrompt, in: app)
+        dismissNativeKeyboard(in: app)
 
         let generate = app.buttons["generate-button"]
         XCTAssertTrue(generate.waitForExistence(timeout: 3))
@@ -113,7 +119,7 @@ final class CloverUITests: XCTestCase {
         )
         XCTAssertTrue(app.staticTexts["Step 30 of 30"].exists)
 
-        app.tabBars.buttons["Library"].tap()
+        app.goToCloverDestination("Library")
         let artwork = app.buttons["artwork-tile"]
         XCTAssertTrue(artwork.waitForExistence(timeout: 8))
         artwork.tap()
@@ -124,12 +130,36 @@ final class CloverUITests: XCTestCase {
     }
 
     @MainActor
+    func testPromptTriggerTokenCanBeRemovedWithBackspace() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-reset", "-ui-testing-preview"]
+        app.launch()
+
+        app.goToCloverDestination("Models")
+        let addMonet = app.buttons["Add Monet"]
+        XCTAssertTrue(addMonet.waitForExistence(timeout: 3))
+        addMonet.tap()
+
+        app.goToCloverDestination("Create")
+        let token = app.buttons["Monet Style trigger"]
+        XCTAssertTrue(token.waitForExistence(timeout: 3))
+
+        let prompt = app.textViews["prompt-field"]
+        app.reveal(prompt)
+        XCTAssertTrue(prompt.waitForExistence(timeout: 3))
+        prompt.tap()
+        prompt.typeText(XCUIKeyboardKey.delete.rawValue)
+
+        XCTAssertFalse(token.waitForExistence(timeout: 1))
+    }
+
+    @MainActor
     func testInpaintingMaskEditorUndoRedoAndBrushControls() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-reset", "-ui-testing-preview"]
         app.launch()
 
-        app.tabBars.buttons["Inpainting"].tap()
+        app.goToCloverDestination("Inpaint")
         let sample = app.buttons["inpainting-sample-button"]
         XCTAssertTrue(sample.waitForExistence(timeout: 5))
         sample.tap()
@@ -138,6 +168,7 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         XCTAssertTrue(app.segmentedControls["inpainting-mask-tool-picker"].exists)
         XCTAssertTrue(app.sliders["inpainting-brush-size"].exists)
+        XCTAssertFalse(app.buttons["inpainting-mask-edit-mode"].exists)
 
         let undo = app.buttons["inpainting-mask-undo"]
         let redo = app.buttons["inpainting-mask-redo"]
@@ -157,7 +188,86 @@ final class CloverUITests: XCTestCase {
         XCTAssertTrue(redo.isEnabled)
         redo.tap()
         XCTAssertTrue(undo.isEnabled)
+
+        app.segmentedControls["inpainting-mask-tool-picker"]
+            .buttons["Erase"]
+            .tap()
+        editor.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.48, dy: 0.48)
+        ).press(
+            forDuration: 0.1,
+            thenDragTo: editor.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.54, dy: 0.54)
+            )
+        )
+        XCTAssertTrue(undo.isEnabled)
         XCTAssertTrue(app.buttons["inpainting-mask-clear"].isEnabled)
+    }
+
+    @MainActor
+    func testInpaintingPromptStaysAboveKeyboard() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-reset", "-ui-testing-preview"]
+        app.launch()
+
+        app.goToCloverDestination("Inpaint")
+        let prompt = app.textViews["inpainting-prompt-field"]
+        app.reveal(prompt)
+        XCTAssertTrue(prompt.waitForExistence(timeout: 3))
+        prompt.tap()
+        prompt.typeText("replace the flowers with a small pond")
+
+        assertEditorIsAboveKeyboard(prompt, in: app)
+        dismissNativeKeyboard(in: app)
+    }
+
+    @MainActor
+    private func assertEditorIsAboveKeyboard(
+        _ editor: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(
+            keyboard.waitForExistence(timeout: 3),
+            "The keyboard should be visible while editing",
+            file: file,
+            line: line
+        )
+        waitForKeyboardLayout()
+        XCTAssertLessThanOrEqual(
+            editor.frame.maxY,
+            keyboard.frame.minY + 1,
+            "The focused editor should remain fully above the keyboard",
+            file: file,
+            line: line
+        )
+    }
+
+    @MainActor
+    private func dismissNativeKeyboard(in app: XCUIApplication) {
+        let keyboardDone = app.keyboards.buttons["Done"]
+        if keyboardDone.waitForExistence(timeout: 1) {
+            keyboardDone.tap()
+        } else {
+            app.keyboards.buttons["Return"].tap()
+        }
+        XCTAssertFalse(
+            app.keyboards.firstMatch.waitForExistence(timeout: 3),
+            "The native keyboard should finish dismissing"
+        )
+        XCTAssertFalse(app.buttons["dismiss-keyboard-button"].exists)
+        waitForKeyboardLayout()
+    }
+
+    @MainActor
+    private func waitForKeyboardLayout() {
+        let transition = expectation(description: "Keyboard layout settles")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            transition.fulfill()
+        }
+        wait(for: [transition], timeout: 1)
     }
 
     @MainActor
@@ -176,9 +286,7 @@ final class CloverUITests: XCTestCase {
         ]
         app.launch()
 
-        let modelPicker = app.buttons["model-picker-button"]
-        XCTAssertTrue(modelPicker.waitForExistence(timeout: 10))
-        modelPicker.tap()
+        app.goToCloverDestination("Models")
 
         let manageMonet = app.buttons["manage-download-monet"]
         XCTAssertTrue(
@@ -189,7 +297,7 @@ final class CloverUITests: XCTestCase {
         if addMonet.exists {
             addMonet.tap()
         }
-        app.buttons["Done"].tap()
+        app.goToCloverDestination("Create")
 
         let parameters = app.buttons["parameters-button"]
         XCTAssertTrue(parameters.waitForExistence(timeout: 5))
@@ -249,7 +357,7 @@ final class CloverUITests: XCTestCase {
         app.launchArguments = ["-DisableSafetyChecker", "NO"]
         app.launch()
 
-        app.tabBars.buttons["Inpainting"].tap()
+        app.goToCloverDestination("Inpaint")
 
         let sample = app.buttons["inpainting-sample-button"]
         XCTAssertTrue(sample.waitForExistence(timeout: 10))
@@ -269,36 +377,26 @@ final class CloverUITests: XCTestCase {
                 )
             )
         }
-        app.buttons["inpainting-example-prompt-button"].tap()
+        app.textViews["inpainting-prompt-field"].tap()
+        app.textViews["inpainting-prompt-field"].typeText(
+            "a small orange tabby cat sitting naturally in the doorway, detailed photography"
+        )
 
-        let ready = app.staticTexts["Ready on device"]
-        let download = app.buttons["inpainting-download-button"]
-        for _ in 0..<5 where !ready.exists && !download.exists {
-            app.swipeUp()
-        }
+        let ready = app.staticTexts["Inpainting model ready"]
+        let openModels = app.buttons["inpainting-open-models"]
         if !ready.exists {
-            XCTAssertTrue(download.waitForExistence(timeout: 20))
+            XCTAssertTrue(openModels.waitForExistence(timeout: 20))
+            openModels.tap()
             XCTAssertTrue(
-                (download.label).contains("1,672 MB"),
-                "The stale model should require the pinned v2 package"
+                app.navigationBars["Models"].waitForExistence(timeout: 3)
             )
-            download.tap()
+            // The device test downloads the pinned inpainting package from the
+            // Models page before returning here.
             XCTAssertTrue(
                 ready.waitForExistence(timeout: 1_800),
                 "The pinned inpainting package did not finish downloading"
             )
         }
-        XCTAssertTrue(app.staticTexts["9-channel SD 1.4-class pipeline"].exists)
-
-        // Keep the production default of 20 steps. Four steps is useful for a
-        // wiring smoke test, but cannot establish object-level edit quality.
-        let settings = app.buttons["inpainting-settings-button"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 5))
-        settings.tap()
-        let stepper = app.steppers["inpainting-steps-stepper"]
-        XCTAssertTrue(stepper.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["20 steps"].exists)
-        app.buttons["Done"].tap()
 
         let generate = app.buttons["inpainting-generate-button"]
         XCTAssertTrue(generate.waitForExistence(timeout: 5))
@@ -320,7 +418,7 @@ final class CloverUITests: XCTestCase {
         )
         XCTAssertEqual(app.state, .runningForeground)
 
-        app.tabBars.buttons["Library"].tap()
+        app.goToCloverDestination("Library")
         let newestArtwork = app.buttons["artwork-tile"].firstMatch
         XCTAssertTrue(newestArtwork.waitForExistence(timeout: 15))
         newestArtwork.tap()
@@ -330,5 +428,22 @@ final class CloverUITests: XCTestCase {
             ].waitForExistence(timeout: 5),
             "The newest Library item should be the completed object inpainting"
         )
+    }
+}
+
+private extension XCUIApplication {
+    func goToCloverDestination(_ name: String) {
+        let destination = buttons[name]
+        XCTAssertTrue(
+            destination.waitForExistence(timeout: 5),
+            "Missing app destination \(name)"
+        )
+        destination.tap()
+    }
+
+    func reveal(_ element: XCUIElement) {
+        for _ in 0..<4 where !element.isHittable {
+            scrollViews.firstMatch.swipeUp()
+        }
     }
 }

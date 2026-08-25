@@ -26,7 +26,6 @@ enum InpaintingRuntimePolicy {
     /// Inpainting edits user-selected pixels in a source image. Keeping this
     /// false by construction avoids a late safety-filter nil after previews.
     static let isSafetyCheckerEnabled = false
-    static let generationAttemptCount = 3
 }
 
 enum CloverPipelineFactory {
@@ -73,8 +72,9 @@ enum CloverPipelineFactory {
         )
     }
 
-    /// Builds the standalone 9-channel inpainting pipeline with the same
-    /// stateful style slots as Create.
+    /// Builds the standalone nine-channel inpainting pipeline. The preferred
+    /// artifact is the stateless full-precision conversion of the published
+    /// Diffusers inpainting U-Net.
     static func makeInpainting(
         resourcesURL: URL,
         styleWeights: [LoRAAdapter.WeightedWeights] = [],
@@ -86,9 +86,22 @@ enum CloverPipelineFactory {
         let adapterSchemaURL = resourcesURL.appending(
             path: "adapter-schema.json"
         )
-        guard FileManager.default.fileExists(atPath: urls.unetURL.path),
+        let pipelineUnetURL = resourcesURL.appending(
+            path: "UnetPipeline.mlmodelc"
+        )
+        let hasPipelineUnet = FileManager.default.fileExists(
+            atPath: pipelineUnetURL.path
+        )
+        let hasChunkedUnet = FileManager.default.fileExists(
+            atPath: urls.unetChunk1URL.path
+        ) && FileManager.default.fileExists(atPath: urls.unetChunk2URL.path)
+        guard hasPipelineUnet || hasChunkedUnet || FileManager.default.fileExists(
+                  atPath: urls.unetURL.path
+              ),
               FileManager.default.fileExists(atPath: urls.encoderURL.path),
-              FileManager.default.fileExists(atPath: adapterSchemaURL.path) else {
+              styleWeights.isEmpty || FileManager.default.fileExists(
+                  atPath: adapterSchemaURL.path
+              ) else {
             throw CloverPipelineError.incompatibleResources
         }
 
@@ -101,18 +114,52 @@ enum CloverPipelineFactory {
             modelAt: urls.textEncoderURL,
             configuration: configuration
         )
-        let adapter = styleWeights.isEmpty
-            ? nil
-            : try LoRAAdapter(
+        let adapter = styleWeights.isEmpty ? nil : try LoRAAdapter(
                 weightedWeights: styleWeights,
                 schemaAt: adapterSchemaURL
             )
-        let unet = makeStatefulUnet(
-            modelURL: urls.unetURL,
-            adapter: adapter,
-            configuration: configuration,
-            useLowMemoryBackend: true
-        )
+        let unet: Unet
+        if hasPipelineUnet, adapter == nil {
+            let unetConfiguration = configuration.copy()
+                as! MLModelConfiguration
+            #if targetEnvironment(simulator)
+            unetConfiguration.computeUnits = .cpuOnly
+            #else
+            unetConfiguration.computeUnits = .all
+            #endif
+            unet = Unet(
+                modelAt: pipelineUnetURL,
+                configuration: unetConfiguration
+            )
+        } else if hasChunkedUnet, adapter == nil {
+            let unetConfiguration = configuration.copy()
+                as! MLModelConfiguration
+            #if targetEnvironment(simulator)
+            unetConfiguration.computeUnits = .cpuOnly
+            #else
+            // Discover's ANE compiler cannot build the first 9-channel HQ
+            // inpainting chunk. The compressed stateless chunks fit together
+            // on the GPU, avoiding the stateful model's MPSGraph assertion.
+            unetConfiguration.computeUnits = .cpuAndGPU
+            #endif
+            unet = Unet(
+                chunksAt: [urls.unetChunk1URL, urls.unetChunk2URL],
+                configuration: unetConfiguration
+            )
+        } else {
+            unet = makeStatefulUnet(
+                modelURL: urls.unetURL,
+                adapter: adapter,
+                configuration: configuration,
+                // Discover (iPhone 15, iOS 26.6) aborts inside MPSGraph while
+                // building a GPU plan for this stateful 9-channel U-Net:
+                // `shape.count = 0 != strides.count = 4`. That assertion is
+                // outside Swift error handling and terminates the whole app.
+                // Keep the U-Net on CPU; text encoding and VAE processing can
+                // still use the user's preferred compute units.
+                useCPUOnly: true
+            )
+        }
         let decoder = Decoder(
             modelAt: urls.decoderURL,
             configuration: configuration
@@ -169,7 +216,7 @@ enum CloverPipelineFactory {
         modelURL: URL,
         adapter: LoRAAdapter?,
         configuration: MLModelConfiguration,
-        useLowMemoryBackend: Bool = false
+        useCPUOnly: Bool = false
     ) -> Unet {
         let unetConfiguration = configuration.copy()
             as! MLModelConfiguration
@@ -178,11 +225,7 @@ enum CloverPipelineFactory {
         unetConfiguration.computeUnits = .cpuOnly
         fallbackComputeUnits = nil
         #else
-        if useLowMemoryBackend {
-            // The 9-channel inpainting U-Net has a substantially larger peak
-            // working set than Create. Keeping it on CPU avoids iOS killing
-            // the process while Core ML builds or executes the GPU plan.
-            // Text encoding and VAE work still use the selected compute target.
+        if useCPUOnly {
             unetConfiguration.computeUnits = .cpuOnly
             fallbackComputeUnits = nil
         } else {

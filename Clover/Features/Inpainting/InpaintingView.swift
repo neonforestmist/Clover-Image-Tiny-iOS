@@ -6,6 +6,7 @@ struct InpaintingView: View {
     let library: ArtworkLibrary
     let modelManager: InpaintingModelManager
     let styleManager: ModelManager
+    @Binding var settings: GenerationSettings
 
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var sourceImage: CGImage?
@@ -13,7 +14,6 @@ struct InpaintingView: View {
     @State private var redoStrokes: [MaskStroke] = []
     @State private var maskTool: MaskTool = .paint
     @State private var brushSize = 56.0
-    @State private var settings = GenerationSettings.inpaintingDefaults
     @State private var presentedSheet: InpaintingSheet?
     @State private var isWorking = false
     @State private var progress = 0.0
@@ -23,122 +23,128 @@ struct InpaintingView: View {
     @State private var cancellation: GenerationCancellationToken?
     @State private var generationTask: Task<Void, Never>?
     @State private var activeGenerationID: UUID?
+    @State private var promptIsFocused = false
+    @Environment(Route.self) private var route
 
     private let service = CoreMLInpaintingService()
 
     private enum InpaintingSheet: Identifiable {
         case settings
-        case styles
         case crop(InpaintingCropSource)
 
         var id: String {
             switch self {
             case .settings:
                 "settings"
-            case .styles:
-                "styles"
             case let .crop(source):
                 "crop-\(source.id.uuidString)"
             }
         }
     }
 
+    private enum ScrollTarget: Hashable {
+        case prompt
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                sourceSection
-                promptSection
-                modelSection
-            }
-            .padding()
-            .padding(.bottom, 18)
-        }
-        .scrollDismissesKeyboard(.immediately)
-        .navigationTitle("Inpainting")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    presentedSheet = .settings
-                } label: {
-                    Label("Settings", systemImage: "slider.horizontal.3")
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 20) {
+                    canvas
+
+                    if sourceImage != nil {
+                        maskControls
+                    }
+
+                    generationSection
                 }
-                .accessibilityIdentifier("inpainting-settings-button")
-                .disabled(isWorking)
+                .frame(maxWidth: 720)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
             }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            actionBar
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-        }
-        .sheet(item: $presentedSheet) { destination in
-            switch destination {
-            case .settings:
-                InpaintingSettingsSheet(settings: $settings)
-            case .styles:
-                ModelPickerView(
-                    settings: $settings,
-                    manager: styleManager
+            .scrollDismissesKeyboard(.immediately)
+            .scrollIndicators(.automatic)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Inpaint")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Parameters", systemImage: "slider.horizontal.3") {
+                        presentedSheet = .settings
+                    }
+                    .labelStyle(.iconOnly)
+                    .accessibilityIdentifier("inpainting-settings-button")
+                    .disabled(isWorking)
+                }
+            }
+            .sheet(item: $presentedSheet) { destination in
+                switch destination {
+                case .settings:
+                    InpaintingSettingsSheet(
+                        settings: $settings,
+                        manager: styleManager
+                    )
+                case let .crop(source):
+                    InpaintingCropSheet(image: source.image) { croppedImage in
+                        selectedPhoto = nil
+                        presentedSheet = nil
+                        applySourceImage(croppedImage)
+                    }
+                }
+            }
+            .task {
+                await modelManager.refresh()
+                await styleManager.refreshCatalog()
+            }
+            .task(id: selectedPhoto) {
+                await loadSelectedPhoto()
+            }
+            .onDisappear {
+                selectedPhoto = nil
+                presentedSheet = nil
+                activeGenerationID = nil
+                cancellation?.cancel()
+                generationTask?.cancel()
+            }
+            .alert(
+                "Couldn’t Inpaint",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
                 )
-            case let .crop(source):
-                InpaintingCropSheet(image: source.image) { croppedImage in
-                    applySourceImage(croppedImage)
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
+            }
+            .onChange(of: promptIsFocused) { _, isFocused in
+                if isFocused {
+                    revealPrompt(using: proxy)
                 }
             }
-        }
-        .task {
-            await modelManager.refresh()
-            await styleManager.refreshCatalog()
-        }
-        .task(id: selectedPhoto) {
-            await loadSelectedPhoto()
-        }
-        .onDisappear {
-            activeGenerationID = nil
-            cancellation?.cancel()
-            generationTask?.cancel()
-        }
-        .alert(
-            "Couldn’t Inpaint",
-            isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(errorMessage ?? "")
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: UIResponder.keyboardWillChangeFrameNotification
+                )
+            ) { _ in
+                if promptIsFocused {
+                    revealPrompt(using: proxy)
+                }
+            }
         }
     }
 
-    private var sourceSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Source image", systemImage: "photo")
-                    .font(.headline)
-                Spacer()
-            }
+    private func revealPrompt(using proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.25)) {
+            proxy.scrollTo(ScrollTarget.prompt, anchor: .bottom)
+        }
+    }
 
+    private var canvas: some View {
+        ZStack {
             if isWorking, let preview {
                 InpaintingPreviewCanvas(preview: preview)
-                    .frame(height: 300)
-
-                HStack(spacing: 7) {
-                    Image(systemName: "photo")
-                    Text("Live preview")
-                    Spacer()
-                    Text(
-                        preview.step >= preview.stepCount
-                            ? "Finishing image…"
-                            : "Step \(preview.step) of \(preview.stepCount)"
-                    )
-                        .monospacedDigit()
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("inpainting-preview-step")
             } else if let sourceImage {
                 MaskEditor(
                     image: sourceImage,
@@ -148,60 +154,71 @@ struct InpaintingView: View {
                 ) {
                     redoStrokes.removeAll()
                 }
-                    .frame(height: 300)
-                    .clipShape(.rect(cornerRadius: 16))
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Mask drawing canvas")
-                    .accessibilityIdentifier("inpainting-mask-editor")
-                    .allowsHitTesting(!isWorking)
-
-                maskControls
-
-                if isWorking {
-                    ProgressView(
-                        settings.livePreviewEnabled
-                            ? "Preparing preview…"
-                            : "Generating without live previews…"
-                    )
-                        .frame(maxWidth: .infinity)
-                }
-
-                Text("Paint white over the area to regenerate. Unpainted pixels stay unchanged.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Working canvas: 512 × 512")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Mask drawing canvas")
+                .accessibilityIdentifier("inpainting-mask-editor")
+                .allowsHitTesting(!isWorking)
             } else {
                 ContentUnavailableView {
-                    Label("Choose an image", systemImage: "photo.badge.plus")
+                    Label("Choose an Image", systemImage: "photo.badge.plus")
                 } description: {
-                    Text("Then paint the part Clover should replace.")
+                    Text("Then paint over the part Clover should replace.")
                 } actions: {
-                    photoPicker
+                    initialPhotoPicker
                     Button("Use Clover Sample") {
                         loadSampleImage()
                     }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("inpainting-sample-button")
                 }
-                .frame(minHeight: 240)
-                .background(
-                    Color(.secondarySystemBackground),
-                    in: .rect(cornerRadius: 16)
-                )
             }
 
-            if sourceImage != nil {
-                photoPicker
-            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .aspectRatio(1, contentMode: .fit)
+        .frame(maxWidth: 680)
+        .clipped()
+        .background(Color(.secondarySystemBackground))
+        .cloverContinuousClip(StudioMetrics.cardCorner)
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: StudioMetrics.cardCorner,
+                style: .continuous
+            )
+            .strokeBorder(StudioPalette.hairline.opacity(0.5))
+        }
+    }
+
+    private var initialPhotoPicker: some View {
+        PhotosPicker(
+            selection: $selectedPhoto,
+            matching: .images,
+            photoLibrary: .shared()
+        ) {
+            Label("Choose Image", systemImage: "photo.on.rectangle")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .disabled(isWorking)
+        .accessibilityIdentifier("inpainting-source-picker")
+    }
+
+    private var replacePhotoPicker: some View {
+        PhotosPicker(
+            selection: $selectedPhoto,
+            matching: .images,
+            photoLibrary: .shared()
+        ) {
+            Label("Replace Image", systemImage: "photo.on.rectangle")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .disabled(isWorking)
+        .accessibilityIdentifier("inpainting-replace-image")
     }
 
     private var maskControls: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
+        VStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Picker("Mask tool", selection: $maskTool) {
                     ForEach(MaskTool.allCases) { tool in
                         Label(tool.title, systemImage: tool.systemImage)
@@ -232,215 +249,57 @@ struct InpaintingView: View {
                 .accessibilityIdentifier("inpainting-mask-redo")
             }
 
-            HStack(spacing: 10) {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 7))
-                    .accessibilityHidden(true)
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Brush Size", systemImage: "circle.dotted")
+                    Spacer()
+                    Text("\(Int(brushSize)) px")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .font(.subheadline)
+
                 Slider(value: $brushSize, in: 20...120, step: 2)
                     .disabled(isWorking)
                     .accessibilityLabel("Mask brush size")
                     .accessibilityValue("\(Int(brushSize)) pixels")
                     .accessibilityIdentifier("inpainting-brush-size")
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 18))
-                    .accessibilityHidden(true)
-                Text("\(Int(brushSize)) px")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 46, alignment: .trailing)
             }
 
-            HStack {
-                Label(
-                    maskTool == .paint ? "Painting edit area" : "Erasing mask",
-                    systemImage: maskTool.systemImage
-                )
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                Spacer()
-                Button("Clear mask", role: .destructive) {
+            HStack(spacing: 12) {
+                replacePhotoPicker
+
+                Button(role: .destructive) {
                     strokes.removeAll()
                     redoStrokes.removeAll()
+                } label: {
+                    Label("Clear Mask", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
                 }
-                .font(.caption.weight(.semibold))
+                .buttonStyle(.bordered)
                 .disabled(strokes.isEmpty || isWorking)
                 .accessibilityIdentifier("inpainting-mask-clear")
             }
         }
-        .padding(12)
-        .background(
-            Color(.secondarySystemBackground),
-            in: .rect(cornerRadius: 14)
-        )
     }
 
-    private var photoPicker: some View {
-        PhotosPicker(
-            selection: $selectedPhoto,
-            matching: .images,
-            photoLibrary: .shared()
-        ) {
-            Label(
-                sourceImage == nil ? "Choose Source Image" : "Replace Image",
-                systemImage: "photo.on.rectangle"
-            )
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
-        .disabled(isWorking)
-        .accessibilityIdentifier("inpainting-source-picker")
-    }
-
-    private var promptSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Prompt")
-                .font(.headline)
-
-            Button("Use cat example") {
-                settings.prompt = "a small orange tabby cat sitting naturally in the doorway, detailed photography"
-            }
-            .font(.caption.weight(.semibold))
-            .accessibilityIdentifier("inpainting-example-prompt-button")
-
-            ZStack(alignment: .topLeading) {
-                if settings.prompt.isEmpty {
-                    Text("Describe what should replace the mask")
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 8)
-                        .allowsHitTesting(false)
-                }
-
-                TextEditor(text: $settings.prompt)
-                    .scrollContentBackground(.hidden)
-                    .textInputAutocapitalization(.sentences)
-                    .accessibilityLabel("Inpainting prompt")
-                    .accessibilityIdentifier("inpainting-prompt-field")
-            }
-            .frame(height: 88)
-            .padding(10)
-            .background(
-                Color(.secondarySystemBackground),
-                in: .rect(cornerRadius: 14)
-            )
-
-            HStack(spacing: 8) {
-                inpaintingPill(
-                    "\(InpaintingGenerationLimits.clampedStepCount(settings.stepCount)) steps",
-                    systemImage: "arrow.triangle.2.circlepath"
-                )
-                inpaintingPill(String(format: "%.1f CFG", settings.guidanceScale), systemImage: "scope")
-                inpaintingPill("#\(settings.seed)", systemImage: "dice")
-            }
-            .font(.caption)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Inpainting model", systemImage: "shippingbox")
-                .font(.headline)
-
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: modelManager.isInstalled
-                    ? "checkmark.circle.fill"
-                    : "arrow.down.circle")
-                    .foregroundStyle(
-                        modelManager.isInstalled
-                            ? .green
-                            : .secondary
-                    )
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(modelStatusTitle)
-                        .font(.subheadline.weight(.semibold))
-                    Text(modelStatusDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-
-                if !styleManager.isBaseInstalled {
-                    Button("Needs Clover") {}
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(true)
-                        .accessibilityIdentifier("inpainting-requires-clover")
-                } else if case .notInstalled = modelManager.state {
-                    Button(downloadButtonTitle) {
-                        modelManager.download()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .accessibilityIdentifier("inpainting-download-button")
-                } else if case .downloading = modelManager.state {
-                    Button("Cancel") {
-                        modelManager.cancel()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-            .padding(12)
-            .background(
-                Color(.secondarySystemBackground),
-                in: .rect(cornerRadius: 14)
-            )
-
-            if case let .downloading(progress) = modelManager.state {
-                ProgressView(value: progress)
-                    .tint(.cloverGreen)
-                if let manifest = modelManager.manifest {
-                    Text("\(manifest.totalSizeInMegabytes) total")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else if case let .failed(message) = modelManager.state {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                Button("Try Again") {
-                    modelManager.download()
-                }
-                .font(.caption.weight(.semibold))
-            }
-
-            Link(
-                "View Core ML model on Hugging Face",
-                destination: URL(string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny-Inpaint-CoreML")!
-            )
-            .font(.caption.weight(.semibold))
-
-            Button {
-                presentedSheet = .styles
-            } label: {
-                Label(
-                    settings.styleIDs.isEmpty
-                        ? "Add Styles"
-                        : "Edit \(settings.styleIDs.count) Active \(settings.styleIDs.count == 1 ? "Style" : "Styles")",
-                    systemImage: "paintpalette"
-                )
-            }
-            .buttonStyle(.bordered)
-            .disabled(isWorking)
-            .accessibilityIdentifier("inpainting-style-picker")
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("inpainting-model-status")
-    }
-
-    private var actionBar: some View {
-        VStack(spacing: 8) {
+    private var generationSection: some View {
+        VStack(spacing: 12) {
             if isWorking {
                 GenerationProgressStatus(
                     progress: progress,
                     activity: activity
                 )
                 .accessibilityIdentifier("inpainting-generation-stage")
+            }
 
+            promptField
+
+            if !modelManager.isInstalled, !isWorking {
+                modelWarningBanner
+            }
+
+            if isWorking {
                 Button(role: .cancel) {
                     cancellation?.cancel()
                     generationTask?.cancel()
@@ -450,6 +309,7 @@ struct InpaintingView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
+                .accessibilityIdentifier("inpainting-generate-button")
             } else {
                 PrimaryGenerationButton(
                     title: "Inpaint",
@@ -461,7 +321,97 @@ struct InpaintingView: View {
                 .accessibilityIdentifier("inpainting-generate-button")
             }
         }
-        .padding(.top, 4)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var promptField: some View {
+        PromptTokenEditor(
+            text: inpaintingPromptBody,
+            tokens: styleTriggerTokens,
+            placeholder: "Describe what should replace the painted area\u{2026}",
+            accessibilityLabel: "Inpainting prompt",
+            accessibilityIdentifier: "inpainting-prompt-field",
+            minimumHeight: 52,
+            removeToken: removeStyle,
+            onFocusChange: { promptIsFocused = $0 }
+        )
+        .id(ScrollTarget.prompt)
+    }
+
+    private var modelWarningBanner: some View {
+        HStack {
+            Button {
+                route.open(.models)
+            } label: {
+                Label(
+                    modelWarningInlineText,
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.footnote)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.orange)
+            .accessibilityIdentifier("inpainting-open-models")
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("inpainting-model-status")
+    }
+
+    private var modelWarningInlineText: String {
+        if !styleManager.isBaseInstalled {
+            return "Download Clover from Models before inpainting."
+        }
+        switch modelManager.state {
+        case .checking:
+            return "Checking the Inpainting model."
+        case .downloading:
+            return "Downloading the Inpainting model."
+        case .failed:
+            return "The Inpainting model download failed. Open Models to retry."
+        case .notInstalled:
+            return "Download the Inpainting model from Models before inpainting."
+        case .installed:
+            return "Inpainting model ready."
+        }
+    }
+
+    private var inpaintingPromptBody: Binding<String> {
+        Binding(
+            get: {
+                settings.promptBody(
+                    removingStyleTriggers: styleTriggerTokens.map(\.title)
+                )
+            },
+            set: { body in
+                settings.setPromptBody(
+                    body,
+                    styleTriggers: styleTriggerTokens.map(\.title)
+                )
+            }
+        )
+    }
+
+    private var styleTriggerTokens: [PromptToken] {
+        settings.styleIDs.compactMap { id in
+            let trigger = styleManager.variant(id: id)?.trigger
+                ?? styleManager.importedStyle(id: id)?.trigger
+            return trigger.map { PromptToken(id: id, title: $0) }
+        }
+    }
+
+    private func removeStyle(_ id: String) {
+        let previousTokens = styleTriggerTokens
+        settings.styleIDs.removeAll { $0 == id }
+        settings.styleStrengths[id] = nil
+        let nextTokens = styleTriggerTokens
+        settings.applyStyleTriggers(
+            nextTokens.map(\.title),
+            replacing: previousTokens.map(\.title)
+        )
+        settings.persist()
     }
 
     private var canGenerate: Bool {
@@ -472,74 +422,23 @@ struct InpaintingView: View {
             && settings.styleIDs.allSatisfy(styleManager.isInstalled)
     }
 
-    private func inpaintingPill(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.quaternary, in: .capsule)
-            .foregroundStyle(.secondary)
-    }
-
-    private var modelStatusTitle: String {
-        if !styleManager.isBaseInstalled {
-            return "Clover is required"
-        }
-        switch modelManager.state {
-        case .installed:
-            return "Ready on device"
-        case .checking:
-            return "Checking Hugging Face"
-        case .downloading:
-            return "Downloading Core ML bundle"
-        case .notInstalled:
-            return "Optional inpainting download"
-        case .failed:
-            return "Download needs attention"
-        }
-    }
-
-    private var modelStatusDetail: String {
-        if !styleManager.isBaseInstalled {
-            return "Download the main Clover model first; shared files are reused"
-        }
-        switch modelManager.state {
-        case .installed:
-            return "High-quality 9-channel pipeline · up to 3 styles"
-        case .checking:
-            return "Fetching the verified release manifest"
-        case let .downloading(progress):
-            if let manifest = modelManager.manifest {
-                return "\(Int(progress * 100))% of \(manifest.totalSizeInMegabytes) · checksummed"
-            } else {
-                return "\(Int(progress * 100))% · checksummed resources"
-            }
-        case .notInstalled:
-            if let manifest = modelManager.manifest {
-                return "\(manifest.totalSizeInMegabytes) · downloaded only when you enable Inpainting"
-            } else {
-                return "Downloaded only when you enable Inpainting"
-            }
-        case let .failed(message):
-            return message
-        }
-    }
-
-    private var downloadButtonTitle: String {
-        guard let manifest = modelManager.manifest else { return "Download" }
-        return "Download \(manifest.totalSizeInMegabytes)"
-    }
-
     private func loadSelectedPhoto() async {
-        guard let selectedPhoto,
-              let data = try? await selectedPhoto.loadTransferable(
-                type: Data.self
-              ),
-              let image = UIImage(data: data)?.cloverNormalized,
-              let cgImage = image.cgImage else {
-            return
-        }
+        guard let selectedPhoto else { return }
+        let data = try? await selectedPhoto.loadTransferable(type: Data.self)
 
         await MainActor.run {
+            // A PhotosPickerItem remains selected until it is explicitly
+            // consumed. Clear it before presenting the crop destination so
+            // returning to this tab cannot load and present the same item.
+            self.selectedPhoto = nil
+
+            guard let data,
+                  let image = UIImage(data: data)?.cloverNormalized,
+                  let cgImage = image.cgImage else {
+                errorMessage = "The selected image couldn’t be opened."
+                return
+            }
+
             if cgImage.width == 512, cgImage.height == 512 {
                 applySourceImage(cgImage)
             } else {
@@ -777,23 +676,22 @@ private struct MaskEditor: View {
         if stroke.points.count == 1 {
             path.addLine(to: point(first, in: rect))
         }
-        context.drawLayer { layer in
-            layer.blendMode = stroke.tool == .paint
-                ? .normal
-                : .destinationOut
-            layer.stroke(
-                path,
-                with: .color(.white.opacity(0.82)),
-                style: StrokeStyle(
-                    lineWidth: max(
-                        1,
-                        stroke.width / CGFloat(image.width) * rect.width
-                    ),
-                    lineCap: .round,
-                    lineJoin: .round
-                )
+        context.blendMode = stroke.tool == .paint
+            ? .normal
+            : .destinationOut
+        context.stroke(
+            path,
+            with: .color(.white),
+            style: StrokeStyle(
+                lineWidth: max(
+                    1,
+                    stroke.width / CGFloat(image.width) * rect.width
+                ),
+                lineCap: .round,
+                lineJoin: .round
             )
-        }
+        )
+        context.blendMode = .normal
     }
 
     private func normalizedPoint(_ location: CGPoint, in rect: CGRect) -> CGPoint {
@@ -911,7 +809,9 @@ private enum MaskRenderer {
         InpaintingView(
             library: .preview,
             modelManager: InpaintingModelManager(),
-            styleManager: ModelManager(previewInstalled: true)
+            styleManager: ModelManager(previewInstalled: true),
+            settings: .constant(.inpaintingDefaults)
         )
+        .environment(Route())
     }
 }

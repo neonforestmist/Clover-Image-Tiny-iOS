@@ -1,72 +1,99 @@
 import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 
 struct ModelPickerView: View {
+    enum Presentation {
+        case sheet
+        case page
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Binding var settings: GenerationSettings
     let manager: ModelManager
+    var inpaintingManager: InpaintingModelManager?
+    var presentation: Presentation = .sheet
 
     @State private var confirmingBaseRemoval = false
-    @State private var styleLimitMessage: String?
+    @State private var confirmingInpaintingRemoval = false
+    @State private var importerPresented = false
+    @State private var storageWarning: String?
 
     var body: some View {
-        NavigationStack {
-            List {
-                cloverSection
-                stylesSection
-                importedSection
-                styleMixSection
-                catalogSection
-            }
-            .navigationTitle("Models & Styles")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Task { await manager.refreshCatalog() }
-                        manager.refreshImported()
-                    } label: {
-                        if manager.isRefreshing {
-                            ProgressView()
-                        } else {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                    }
-                    .disabled(manager.isRefreshing)
-                }
+        content
+            .modifier(OptionalNavigationStack(enabled: presentation == .sheet))
+    }
 
+    @ViewBuilder
+    private var content: some View {
+        List {
+            cloverSection
+            if let inpaintingManager {
+                inpaintingSection(inpaintingManager)
+            }
+            stylesSection
+            importedSection
+            catalogSection
+            licenseSection
+        }
+        .navigationTitle(presentation == .page ? "Models" : "Models & LoRA Styles")
+        .navigationBarTitleDisplayMode(presentation == .page ? .large : .inline)
+        .toolbar {
+            if presentation == .sheet {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                         .fontWeight(.semibold)
                 }
             }
-            .task {
-                await manager.refreshCatalog()
-                manager.refreshImported()
-            }
-            .alert(
-                "Couldn’t Refresh Models",
-                isPresented: Binding(
-                    get: { manager.errorMessage != nil },
-                    set: { if !$0 { manager.errorMessage = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(manager.errorMessage ?? "")
-            }
-            .alert(
-                "Style Limit",
-                isPresented: Binding(
-                    get: { styleLimitMessage != nil },
-                    set: { if !$0 { styleLimitMessage = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(styleLimitMessage ?? "")
+        }
+        .refreshable {
+            await refreshAll()
+        }
+        .task {
+            await manager.refreshCatalog()
+            manager.refreshImported()
+            if let inpaintingManager {
+                await inpaintingManager.refresh()
             }
         }
-        .presentationDetents([.large])
+        .alert(
+            "Couldn’t Refresh Models",
+            isPresented: Binding(
+                get: { manager.errorMessage != nil },
+                set: { if !$0 { manager.errorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(manager.errorMessage ?? "")
+        }
+        .alert(
+            "Not Enough Storage",
+            isPresented: Binding(
+                get: { storageWarning != nil },
+                set: { if !$0 { storageWarning = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(storageWarning ?? "")
+        }
+        .fileImporter(
+            isPresented: $importerPresented,
+            allowedContentTypes: [.safetensorsFile]
+        ) { result in
+            handleImport(result)
+        }
+        .modifier(SheetDetents(enabled: presentation == .sheet))
+    }
+
+    @MainActor
+    private func refreshAll() async {
+        await manager.refreshCatalog()
+        manager.refreshImported()
+        if let inpaintingManager {
+            await inpaintingManager.refresh()
+        }
     }
 
     // MARK: - Clover base model
@@ -78,20 +105,18 @@ struct ModelPickerView: View {
                 ModelVariantRow(
                     variant: base,
                     state: manager.state(for: base.id),
-                    isSelected: settings.styleIDs.isEmpty,
                     isLocked: false,
                     downloadSize: manager.requiredDownloadSize(for: base),
                     canDownload: manager.canDownload(base),
-                    select: { select(base.id) },
-                    download: { manager.download(base) },
+                    download: { requestDownload(base) },
                     cancel: { manager.cancelDownload(base.id) },
                     remove: { confirmingBaseRemoval = true }
                 )
             } header: {
-                Text("Clover Model")
+                Text("Clover Image")
             } footer: {
                 Text(
-                    "Download Clover first — it’s a one-time \(formattedCloverSize) model that runs entirely on your iPhone. Files are verified with SHA-256 and stored in On My iPhone › Clover › Models."
+                    "One-time \(formattedCloverSize) runtime download. The full 1.6 GB repository also includes an unused 608 MB safety-checker model. Stored in On My iPhone › Clover › Models."
                 )
             }
             .confirmationDialog(
@@ -100,7 +125,7 @@ struct ModelPickerView: View {
                 titleVisibility: .visible
             ) {
                 Button("Remove Downloads", role: .destructive) {
-                    select(base.id)
+                    clearStyleMix()
                     manager.remove(base)
                 }
                 Button("Cancel", role: .cancel) {}
@@ -110,7 +135,114 @@ struct ModelPickerView: View {
         }
     }
 
-    // MARK: - Styles
+    @ViewBuilder
+    private func inpaintingSection(_ inpaintingManager: InpaintingModelManager) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "paintbrush.pointed.fill")
+                        .font(.title2)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(
+                            inpaintingManager.isInstalled
+                                ? AnyShapeStyle(.cloverGreen)
+                                : AnyShapeStyle(.secondary)
+                        )
+                        .frame(width: 52, height: 52)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Inpainting U-Net")
+                            .font(.headline)
+                        Text("Optional 9-channel model for replacing masked areas.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if !manager.isBaseInstalled {
+                        Image(systemName: "lock.fill")
+                            .foregroundStyle(.tertiary)
+                            .frame(minWidth: 28, minHeight: 28)
+                            .accessibilityLabel("Install Clover first")
+                    }
+                }
+
+                if inpaintingManager.isInstalled {
+                    HStack(spacing: 10) {
+                        Label("Installed", systemImage: "checkmark")
+                            .foregroundStyle(.secondary)
+
+                        Spacer(minLength: 0)
+
+                        Menu {
+                            Button(role: .destructive) {
+                                confirmingInpaintingRemoval = true
+                            } label: {
+                                Label("Remove Download", systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 28, minHeight: 28)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Manage Inpainting download")
+                        .accessibilityIdentifier("manage-download-inpainting")
+                    }
+                } else if manager.isBaseInstalled,
+                   case .downloading = inpaintingManager.state {
+                    Button("Cancel Download", role: .cancel) {
+                        inpaintingManager.cancel()
+                    }
+                    .buttonStyle(.bordered)
+                } else if manager.isBaseInstalled,
+                          !inpaintingManager.isInstalled {
+                    ModelDownloadButton(
+                        size: inpaintingManager.manifest?.totalSize ?? 0,
+                        action: requestInpaintingDownload
+                    )
+                    .accessibilityLabel("Download Inpainting model")
+                }
+
+                if case let .downloading(progress) = inpaintingManager.state {
+                    ProgressView(value: progress) {
+                        Text("Downloading \(progress, format: .percent)")
+                            .font(.caption)
+                    }
+                    .tint(.cloverGreen)
+                } else if case let .failed(message) = inpaintingManager.state {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        } header: {
+            Text("Inpainting")
+        } footer: {
+                Text(
+                    manager.isBaseInstalled
+                        ? "Optional. Downloaded only when you enable Inpainting."
+                        : "Requires Clover."
+                )
+        }
+        .confirmationDialog(
+            "Remove Inpainting download?",
+            isPresented: $confirmingInpaintingRemoval,
+            titleVisibility: .visible
+        ) {
+            Button("Remove Download", role: .destructive) {
+                inpaintingManager.removeDownload()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You can download the Inpainting model again at any time.")
+        }
+    }
+
+    // MARK: - LoRA styles
 
     @ViewBuilder
     private var stylesSection: some View {
@@ -121,29 +253,27 @@ struct ModelPickerView: View {
                     ModelVariantRow(
                         variant: style,
                         state: manager.state(for: style.id),
-                        isSelected: settings.styleIDs.contains(style.id),
                         isLocked: manager.isLocked(style),
                         downloadSize: manager.requiredDownloadSize(for: style),
                         canDownload: manager.canDownload(style),
-                        select: { select(style.id) },
-                        download: { manager.download(style) },
+                        download: { requestDownload(style) },
                         cancel: { manager.cancelDownload(style.id) },
                         remove: { removeStyle(style) }
                     )
                 }
             } header: {
-                Text("Styles")
+                Text("LoRA Styles")
             } footer: {
                 Text(
                     manager.isBaseInstalled
-                        ? "Mix up to \(GenerationSettings.maximumStyleCount) downloaded LoRAs. Clover adds their trigger phrases and lets you tune each strength below."
+                        ? "Downloaded LoRAs appear in Create › Parameters, where you can enable up to \(GenerationSettings.maximumStyleCount) styles and tune their weights."
                         : "Install Clover above to unlock these styles."
                 )
             }
         }
     }
 
-    // MARK: - Imported styles
+    // MARK: - Imported LoRA styles
 
     @ViewBuilder
     private var importedSection: some View {
@@ -166,12 +296,19 @@ struct ModelPickerView: View {
                 ForEach(manager.imported) { style in
                     ImportedStyleRow(
                         style: style,
-                        isSelected: settings.styleIDs.contains(style.id),
                         isLocked: style.requiresClover
                             && !manager.isBaseInstalled,
-                        select: { select(style.id) }
+                        saveTrigger: { trigger in
+                            saveImportedTrigger(trigger, for: style)
+                        }
                     )
                 }
+            }
+
+            Button {
+                importerPresented = true
+            } label: {
+                Label("Import File…", systemImage: "square.and.arrow.down")
             }
 
             Button {
@@ -179,48 +316,18 @@ struct ModelPickerView: View {
             } label: {
                 Label("Rescan Files", systemImage: "arrow.clockwise")
             }
+
+            Button {
+                UIApplication.shared.open(ModelStorage.importedRootURL)
+            } label: {
+                Label("Reveal in Files", systemImage: "folder")
+            }
         } header: {
-            Text("Imported Styles")
+            Text("Imported LoRA Styles")
         } footer: {
             Text(
-                "Drop a Clover-compatible .safetensors file into On My iPhone › Clover › Imported Styles. The app detects it and loads the style into your installed Clover model."
+                "Drop a Clover-compatible .safetensors file into On My iPhone › Clover › Imported Styles. The app detects it and makes it available in the LoRA Style Mix."
             )
-        }
-    }
-
-    @ViewBuilder
-    private var styleMixSection: some View {
-        if !settings.styleIDs.isEmpty {
-            Section {
-                ForEach(settings.styleIDs, id: \.self) { id in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(manager.displayName(for: id) ?? "Imported Style")
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text(settings.styleStrength(for: id), format: .number.precision(.fractionLength(2)))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                        }
-                        Slider(
-                            value: Binding(
-                                get: { settings.styleStrength(for: id) },
-                                set: {
-                                    settings.setStyleStrength($0, for: id)
-                                    settings.persist()
-                                }
-                            ),
-                            in: 0...1.5,
-                            step: 0.05
-                        )
-                        .accessibilityLabel("\(manager.displayName(for: id) ?? "Style") strength")
-                    }
-                }
-            } header: {
-                Text("Style Mix")
-            } footer: {
-                Text("Strength 1.00 uses the LoRA as trained. Lower values soften it; values above 1.00 make it more pronounced.")
-            }
         }
     }
 
@@ -234,42 +341,118 @@ struct ModelPickerView: View {
         }
     }
 
+    private var licenseSection: some View {
+        Section {
+            Link(
+                "CreativeML Open RAIL-M",
+                destination: URL(
+                    string: "https://huggingface.co/neonforestmist/Clover-Image-Tiny/blob/main/LICENSE"
+                )!
+            )
+            .accessibilityIdentifier("model-license-link")
+        } header: {
+            Text("Model License")
+        } footer: {
+            Text(
+                "Clover’s converted weights and derived LoRA styles are licensed under CreativeML Open RAIL-M."
+            )
+        }
+    }
+
     // MARK: - Actions
 
-    private func select(_ id: String) {
-        let previousIDs = settings.styleIDs
-        var nextIDs = previousIDs
-        if id == ModelManager.baseID {
-            nextIDs.removeAll()
-        } else if let index = nextIDs.firstIndex(of: id) {
-            nextIDs.remove(at: index)
-            settings.styleStrengths[id] = nil
-        } else {
-            guard nextIDs.count < GenerationSettings.maximumStyleCount else {
-                styleLimitMessage = "Remove a selected style before adding another. This Core ML model can mix up to \(GenerationSettings.maximumStyleCount) LoRAs at once."
-                return
-            }
-            nextIDs.append(id)
-            settings.styleStrengths[id] = 1
+    private func requestDownload(_ variant: ModelCatalog.Variant) {
+        let needed = manager.requiredDownloadSize(for: variant)
+        let verdict = ResourceGuard().check(requiredBytes: needed)
+        if verdict.blocksDownload {
+            storageWarning = verdict.advisoryText
+            return
         }
+        manager.download(variant)
+    }
+
+    private func requestInpaintingDownload() {
+        let needed = inpaintingManager?.manifest?.totalSize ?? 1_800_000_000
+        let verdict = ResourceGuard().check(requiredBytes: needed)
+        if verdict.blocksDownload {
+            storageWarning = verdict.advisoryText
+            return
+        }
+        inpaintingManager?.download()
+    }
+
+    private func handleImport(_ result: Result<URL, Error>) {
+        guard case let .success(url) = result else { return }
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed { url.stopAccessingSecurityScopedResource() }
+        }
+        let destination = ModelStorage.importedRootURL.appending(
+            path: url.lastPathComponent
+        )
+        do {
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: url, to: destination)
+            manager.refreshImported()
+        } catch {
+            manager.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func clearStyleMix() {
+        let previousIDs = settings.styleIDs
         settings.applyStyleTriggers(
-            triggers(for: nextIDs),
+            [],
             replacing: triggers(for: previousIDs)
         )
-        settings.styleIDs = nextIDs
+        settings.styleIDs.removeAll()
+        settings.styleStrengths.removeAll()
         settings.modelID = ModelManager.baseID
         settings.persist()
     }
 
     private func removeStyle(_ style: ModelCatalog.Variant) {
         if settings.styleIDs.contains(style.id) {
-            select(style.id)
+            let previousIDs = settings.styleIDs
+            settings.styleIDs.removeAll { $0 == style.id }
+            settings.styleStrengths[style.id] = nil
+            settings.applyStyleTriggers(
+                triggers(for: settings.styleIDs),
+                replacing: triggers(for: previousIDs)
+            )
+            settings.persist()
         }
         manager.remove(style)
     }
 
     private func triggers(for ids: [String]) -> [String] {
-        ids.compactMap { manager.variant(id: $0)?.trigger }
+        ids.compactMap { id in
+            manager.variant(id: id)?.trigger
+                ?? manager.importedStyle(id: id)?.trigger
+        }
+    }
+
+    private func saveImportedTrigger(
+        _ trigger: String,
+        for style: ModelStorage.ImportedStyle
+    ) {
+        let previousTriggers = triggers(for: settings.styleIDs)
+        do {
+            try ModelStorage.setImportedTrigger(
+                trigger,
+                for: style.weightsURL
+            )
+            manager.refreshImported()
+            settings.applyStyleTriggers(
+                triggers(for: settings.styleIDs),
+                replacing: previousTriggers
+            )
+            settings.persist()
+        } catch {
+            manager.errorMessage = error.localizedDescription
+        }
     }
 
     private var formattedCloverSize: String {
@@ -277,8 +460,8 @@ struct ModelPickerView: View {
         let bytes = manager.catalog.baseVariant
             .map { manager.requiredDownloadSize(for: $0) }
             ?? manager.catalog.common.downloadSize
-        guard bytes > 0 else { return "≈1.5 GB" }
-        return "≈\(bytes.formatted(.byteCount(style: .memory)))"
+        guard bytes > 0 else { return "994.9 MB" }
+        return bytes.formatted(.byteCount(style: .file))
     }
 }
 
@@ -287,44 +470,51 @@ struct ModelPickerView: View {
 private struct ModelVariantRow: View {
     let variant: ModelCatalog.Variant
     let state: ModelManager.InstallState
-    let isSelected: Bool
     let isLocked: Bool
     let downloadSize: Int64
     let canDownload: Bool
-    let select: () -> Void
     let download: () -> Void
     let cancel: () -> Void
     let remove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 icon
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(variant.name)
                         .font(.headline)
                         .foregroundStyle(isLocked ? .secondary : .primary)
                     Text(variant.summary)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     if let trigger = variant.trigger {
-                        Text("Trigger: \(trigger)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let filename = variant.publicWeightsFilename {
-                        Text(filename)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.tertiary)
+                        Text(trigger)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tint)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(
+                                Color.accentColor.opacity(0.14),
+                                in: .rect(cornerRadius: 6)
+                            )
                     }
                 }
 
                 Spacer(minLength: 8)
-                action
+
+                if isLocked {
+                    Image(systemName: "lock.fill")
+                        .foregroundStyle(.tertiary)
+                        .frame(minWidth: 28, minHeight: 28)
+                        .accessibilityLabel("\(variant.name) requires Clover")
+                }
             }
+
+            action
 
             if case let .downloading(progress) = state {
                 ProgressView(value: progress) {
@@ -340,40 +530,55 @@ private struct ModelVariantRow: View {
                     .foregroundStyle(.red)
             }
         }
-        .padding(.vertical, 4)
-        .contentShape(.rect)
-        .onTapGesture {
-            if state == .installed { select() }
-        }
+        .padding(.vertical, 6)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("model-\(variant.id)")
     }
 
+    @ViewBuilder
     private var icon: some View {
-        Image(variant.iconAssetName)
-            .resizable()
-            .scaledToFit()
-            .padding(6)
-            .foregroundStyle(isLocked ? AnyShapeStyle(.secondary) : AnyShapeStyle(.cloverGreen))
-            .frame(width: 30, height: 30)
-            .background(.quaternary, in: .circle)
+        if variant.id == ModelManager.baseID {
+            Image(systemName: "sparkles")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(
+                    isLocked
+                        ? AnyShapeStyle(.secondary)
+                        : AnyShapeStyle(.cloverGreen)
+                )
+                .frame(width: 52, height: 52)
+                .background(
+                    Color(.secondarySystemGroupedBackground),
+                    in: .rect(cornerRadius: 12, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(StudioPalette.hairline.opacity(0.5))
+                }
+                .accessibilityHidden(true)
+        } else {
+            Image(variant.iconAssetName)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 52, height: 52)
+                .cloverContinuousClip(12)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(StudioPalette.hairline.opacity(0.5))
+                }
+                .saturation(isLocked ? 0 : 1)
+                .opacity(isLocked ? 0.45 : 1)
+        }
     }
 
     @ViewBuilder
     private var action: some View {
         switch state {
         case .installed:
-            HStack(spacing: 12) {
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.cloverGreen)
-                        .accessibilityLabel("\(variant.name), selected. Tap row to remove")
-                } else {
-                    Button("Add", action: select)
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("Add \(variant.name)")
-                }
+            HStack(spacing: 10) {
+                Label("Installed", systemImage: "checkmark")
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 0)
 
                 Menu {
                     Button(role: .destructive, action: remove) {
@@ -391,27 +596,20 @@ private struct ModelVariantRow: View {
             }
 
         case .downloading:
-            Button("Cancel", role: .cancel, action: cancel)
-                .buttonStyle(.borderless)
+            Button("Cancel Download", role: .cancel, action: cancel)
+                .buttonStyle(.bordered)
 
         case .notInstalled, .failed:
             if isLocked {
-                Label("Locked", systemImage: "lock.fill")
-                    .labelStyle(.iconOnly)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityLabel("\(variant.name) is locked until Clover is installed")
+                Text("Install Clover to download this LoRA.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             } else {
-                Button(action: download) {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Image(systemName: state.isFailed
-                            ? "arrow.clockwise.circle"
-                            : "arrow.down.circle")
-                            .font(.title3)
-                        Text(downloadSize > 0 ? formattedDownloadSize : "Included")
-                            .font(.caption2)
-                    }
-                }
-                .buttonStyle(.borderless)
+                ModelDownloadButton(
+                    size: downloadSize,
+                    isRetry: state.isFailed,
+                    action: download
+                )
                 .disabled(!canDownload)
                 .accessibilityLabel(
                     state.isFailed
@@ -421,9 +619,40 @@ private struct ModelVariantRow: View {
             }
         }
     }
+}
 
-    private var formattedDownloadSize: String {
-        downloadSize.formatted(.byteCount(style: .file))
+// MARK: - Native download action
+
+private struct ModelDownloadButton: View {
+    let size: Int64
+    var isRetry = false
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Button(action: action) {
+                Label(
+                    buttonTitle,
+                    systemImage: isRetry
+                        ? "arrow.clockwise.circle"
+                        : "arrow.down.circle"
+                )
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(minHeight: 44)
+    }
+
+    private var buttonTitle: String {
+        let sizeText = size > 0
+            ? size.formatted(.byteCount(style: .file))
+            : nil
+        if isRetry {
+            return sizeText.map { "Retry Download \($0)" }
+                ?? "Retry Download"
+        }
+        return sizeText.map { "Download \($0)" } ?? "Download"
     }
 }
 
@@ -431,59 +660,101 @@ private struct ModelVariantRow: View {
 
 private struct ImportedStyleRow: View {
     let style: ModelStorage.ImportedStyle
-    let isSelected: Bool
     let isLocked: Bool
-    let select: () -> Void
+    let saveTrigger: (String) -> Void
+
+    @State private var triggerDraft: String
+    @FocusState private var triggerIsFocused: Bool
+
+    init(
+        style: ModelStorage.ImportedStyle,
+        isLocked: Bool,
+        saveTrigger: @escaping (String) -> Void
+    ) {
+        self.style = style
+        self.isLocked = isLocked
+        self.saveTrigger = saveTrigger
+        _triggerDraft = State(initialValue: style.trigger ?? "")
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: style.requiresClover
-                ? "paintbrush.pointed.fill"
-                : "square.and.arrow.down.on.square.fill")
-                .font(.title3)
-                .foregroundStyle(
-                    isLocked
-                        ? AnyShapeStyle(.secondary)
-                        : AnyShapeStyle(.cloverGreen)
-                )
-                .frame(width: 30, height: 30)
-                .background(.quaternary, in: .circle)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(style.name)
-                    .font(.headline)
-                    .foregroundStyle(isLocked ? .secondary : .primary)
-                Text(style.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 8)
-
-            if isLocked {
-                Image(systemName: "lock.fill")
-                    .foregroundStyle(.tertiary)
-                    .accessibilityLabel(
-                        "\(style.name) requires Clover"
-                    )
-            } else if isSelected {
-                Image(systemName: "checkmark.circle.fill")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: style.requiresClover
+                    ? "paintbrush.pointed.fill"
+                    : "square.and.arrow.down.on.square.fill")
                     .font(.title3)
-                    .foregroundStyle(.cloverGreen)
-                    .accessibilityLabel("\(style.name), selected")
-            } else {
-                Button("Add", action: select)
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Add \(style.name)")
+                    .foregroundStyle(
+                        isLocked
+                            ? AnyShapeStyle(.secondary)
+                            : AnyShapeStyle(.cloverGreen)
+                    )
+                    .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(style.name)
+                        .font(.headline)
+                        .foregroundStyle(isLocked ? .secondary : .primary)
+                    Text(style.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                if isLocked {
+                    Image(systemName: "lock.fill")
+                        .foregroundStyle(.tertiary)
+                        .accessibilityLabel(
+                            "\(style.name) requires Clover"
+                        )
+                }
             }
+
+            Label("Installed", systemImage: "checkmark")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Trigger word")
+                    Text("Optional")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+
+                TextField("None", text: $triggerDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .multilineTextAlignment(.trailing)
+                    .frame(minWidth: 110, idealWidth: 150, maxWidth: 190)
+                    .focused($triggerIsFocused)
+                    .submitLabel(.done)
+                    .onSubmit(commitTrigger)
+                    .accessibilityLabel("Trigger word for \(style.name), optional")
+                    .accessibilityIdentifier("imported-trigger-\(style.name)")
+            }
+            .disabled(isLocked)
         }
-        .padding(.vertical, 4)
-        .contentShape(.rect)
-        .onTapGesture {
-            if !isLocked { select() }
+        .padding(.vertical, 6)
+        .onChange(of: triggerIsFocused) { wasFocused, isFocused in
+            if wasFocused && !isFocused {
+                commitTrigger()
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("imported-\(style.name)")
+    }
+
+    private func commitTrigger() {
+        let cleaned = triggerDraft.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard cleaned != (style.trigger ?? "") else { return }
+        triggerDraft = cleaned
+        saveTrigger(cleaned)
     }
 }
 
@@ -491,6 +762,36 @@ private extension ModelManager.InstallState {
     var isFailed: Bool {
         if case .failed = self { return true }
         return false
+    }
+}
+
+private extension UTType {
+    static var safetensorsFile: UTType {
+        UTType(filenameExtension: "safetensors") ?? .data
+    }
+}
+
+private struct OptionalNavigationStack: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            NavigationStack { content }
+        } else {
+            content
+        }
+    }
+}
+
+private struct SheetDetents: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.presentationDetents([.large])
+        } else {
+            content
+        }
     }
 }
 

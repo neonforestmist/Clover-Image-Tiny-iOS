@@ -57,14 +57,18 @@ final class ModelDownloader: Sendable {
         )
         // When Clover's shared components are already installed, a style only
         // needs its own (small or empty) files, so bill progress against those.
+        let commonFiles = ModelStorage.runtimeCommonFiles(catalog.common.files)
+        let commonDownloadSize = commonFiles.reduce(Int64(0)) {
+            $0 + $1.size
+        }
         let totalBytes = reuseCommon
             ? variant.downloadSize
-            : catalog.common.downloadSize + variant.downloadSize
+            : commonDownloadSize + variant.downloadSize
         var completedBytes: Int64 = 0
 
         if !reuseCommon {
             completedBytes = try await download(
-                files: catalog.common.files,
+                files: commonFiles,
                 revision: catalog.common.revision,
                 repository: catalog.common.repository,
                 catalog: catalog,
@@ -232,7 +236,7 @@ final class ModelDownloader: Sendable {
         )
 
         let commonComponents = Set(
-            catalog.common.files.compactMap {
+            ModelStorage.runtimeCommonFiles(catalog.common.files).compactMap {
                 $0.path.split(separator: "/").first.map(String.init)
             }
         )

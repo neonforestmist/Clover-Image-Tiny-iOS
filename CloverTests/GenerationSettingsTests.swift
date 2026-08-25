@@ -173,6 +173,40 @@ final class GenerationSettingsTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: obsolete.path))
     }
 
+    func testAdoptRestoresSnapshotIntoSettings() {
+        var original = GenerationSettings()
+        original.prompt = "a glass greenhouse"
+        original.negativePrompt = "blur"
+        original.stepCount = 24
+        original.guidanceScale = 6.5
+        original.seed = 99
+        original.scheduler = .dpmSolver
+        original.randomGenerator = .torch
+        original.computeTarget = .gpu
+        original.styleIDs = ["monet"]
+        original.setStyleStrength(0.8, for: "monet")
+
+        var restored = GenerationSettings()
+        restored.adopt(GenerationSnapshot(settings: original, imageIndex: 0))
+
+        XCTAssertEqual(restored.prompt, "a glass greenhouse")
+        XCTAssertEqual(restored.stepCount, 24)
+        XCTAssertEqual(restored.seed, 99)
+        XCTAssertEqual(restored.styleIDs, ["monet"])
+        XCTAssertEqual(restored.styleStrength(for: "monet"), 0.8)
+    }
+
+    func testResourceGuardReportsInsufficientSpace() {
+        let verdict = ResourceGuard.Verdict.insufficientSpace(
+            needBytes: 2_000_000_000,
+            freeBytes: 100
+        )
+
+        XCTAssertTrue(verdict.blocksDownload)
+        XCTAssertNotNil(verdict.advisoryText)
+        XCTAssertNil(ResourceGuard.Verdict.ok.advisoryText)
+    }
+
     func testSnapshotKeepsTheGenerationSeed() {
         var settings = GenerationSettings()
         settings.seed = 41
@@ -257,6 +291,45 @@ final class GenerationSettingsTests: XCTestCase {
         )
 
         XCTAssertEqual(settings.prompt, "pointillism painting, a garden")
+    }
+
+    func testPromptBodyHidesProtectedStyleTriggers() {
+        var settings = GenerationSettings()
+        settings.prompt = "Monet Style, pointillism painting, a garden"
+
+        XCTAssertEqual(
+            settings.promptBody(
+                removingStyleTriggers: [
+                    "Monet Style",
+                    "pointillism painting",
+                ]
+            ),
+            "a garden"
+        )
+    }
+
+    func testEditingPromptBodyKeepsProtectedStyleTriggers() {
+        var settings = GenerationSettings()
+
+        settings.setPromptBody(
+            "a moonlit garden",
+            styleTriggers: ["Monet Style", "pointillism painting"]
+        )
+
+        XCTAssertEqual(
+            settings.prompt,
+            "Monet Style, pointillism painting, a moonlit garden"
+        )
+    }
+
+    func testPromptBodyPreservesSpacesWhileTyping() {
+        var settings = GenerationSettings()
+        settings.prompt = "Monet Style, a "
+
+        XCTAssertEqual(
+            settings.promptBody(removingStyleTriggers: ["Monet Style"]),
+            "a "
+        )
     }
 
     func testLegacySingleStyleMigratesToStyleIDs() throws {
@@ -642,7 +715,14 @@ final class GenerationSettingsTests: XCTestCase {
         let filename = "Codex Test \(UUID().uuidString).safetensors"
         let url = ModelStorage.importedRootURL.appending(path: filename)
         try Data(repeating: 0, count: 9).write(to: url)
-        defer { try? FileManager.default.removeItem(at: url) }
+        try ModelStorage.setImportedTrigger(
+            "  storybook anime,  ",
+            for: url
+        )
+        defer {
+            try? ModelStorage.setImportedTrigger(nil, for: url)
+            try? FileManager.default.removeItem(at: url)
+        }
 
         let style = try XCTUnwrap(
             ModelStorage.importedStyles().first {
@@ -652,6 +732,7 @@ final class GenerationSettingsTests: XCTestCase {
 
         XCTAssertEqual(style.name, url.deletingPathExtension().lastPathComponent)
         XCTAssertEqual(style.fileSize, 9)
+        XCTAssertEqual(style.trigger, "storybook anime")
         XCTAssertTrue(style.requiresClover)
         XCTAssertEqual(
             ModelStorage.importedWeightsURL(for: style.id)?.standardizedFileURL,

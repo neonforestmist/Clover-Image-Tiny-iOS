@@ -69,7 +69,34 @@ public final class ManagedMLModel: ResourceManaging {
                 return nil
             }
             let state = model.makeState()
-            try loraAdapter?.populate(state)
+            if let loraAdapter {
+                try loraAdapter.populate(state)
+            } else {
+                // Core ML does not promise useful contents for newly-created
+                // mutable buffers on every execution backend. Clover's model
+                // states are additive LoRA weights, so base inference requires
+                // every state tensor to start at exactly zero.
+                for name in model.modelDescription.stateDescriptionsByName.keys {
+                    try state.withMultiArray(for: name) { values in
+                        switch values.dataType {
+                        case .float16:
+                            values.withUnsafeMutableBufferPointer(
+                                ofType: Float16.self
+                            ) { output, _ in
+                                output.initialize(repeating: 0)
+                            }
+                        case .float32:
+                            values.withUnsafeMutableBufferPointer(
+                                ofType: Float32.self
+                            ) { output, _ in
+                                output.initialize(repeating: 0)
+                            }
+                        default:
+                            throw CocoaError(.featureUnsupported)
+                        }
+                    }
+                }
+            }
             return state
         }
     }
@@ -218,11 +245,16 @@ public extension Array where Element == ManagedMLModel {
     /// - Returns: Final prediction results after processing through all models.
     /// - Throws: Errors if the array is empty, predictions fail, or results can't be combined.
     func predictions(from batch: MLBatchProvider) throws -> MLBatchProvider {
-        var results = try self.first!.predictions(from: batch)
-
         if self.count == 1 {
-            return results
+            return try self.first!.predictions(from: batch)
         }
+
+        // Keep the compressed stages resident for the denoising loop. Reloading
+        // both chunks on every step avoided a temporary peak with the old
+        // 8-bit export, but made a single image take tens of minutes. Clover's
+        // 4-bit stateless export is small enough for both stages to remain
+        // loaded on supported iPhones.
+        var results = try self.first!.predictions(from: batch)
 
         // Manual pipeline batch prediction
         let inputs = batch.arrayOfFeatureValueDictionaries

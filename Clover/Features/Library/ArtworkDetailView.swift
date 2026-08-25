@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct ArtworkDetailView: View {
     let artwork: Artwork
     let library: ArtworkLibrary
+    @Environment(Route.self) private var route
 
     @State private var saveError: String?
     @State private var savedToPhotos = false
@@ -25,7 +26,7 @@ struct ArtworkDetailView: View {
                     frameIndex: frameSelection
                 )
                     .aspectRatio(1, contentMode: .fit)
-                    .clipShape(.rect(cornerRadius: 18))
+                    .clipShape(.rect(cornerRadius: 22, style: .continuous))
 
                 ArtworkTimelineControls(
                     artwork: artwork,
@@ -75,8 +76,8 @@ struct ArtworkDetailView: View {
     }
 
     private var actions: some View {
-        VStack(spacing: 12) {
-            HStack {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
                 ShareLink(
                     item: library.frameURL(
                         for: artwork,
@@ -86,7 +87,6 @@ struct ArtworkDetailView: View {
                     Label("Share", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
 
                 Button {
                     saveToPhotoLibrary()
@@ -94,20 +94,28 @@ struct ArtworkDetailView: View {
                     Label("Save", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
             }
 
-            if !library.previewFrames(for: artwork).isEmpty {
-                Button {
-                    exportStepsArchive()
-                } label: {
-                    Label("Download Steps as ZIP", systemImage: "arrow.down.doc")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("download-steps-zip")
+            Button {
+                exportStepsArchive()
+            } label: {
+                Label("Download Steps as ZIP", systemImage: "arrow.down.doc")
+                    .frame(maxWidth: .infinity)
+            }
+            .accessibilityIdentifier("download-steps-zip")
+
+            Button {
+                var settings = GenerationSettings()
+                settings.adopt(artwork.generation)
+                route.openCreate(with: settings)
+            } label: {
+                Label("Load Settings into Studio", systemImage: "slider.horizontal.3")
+                    .frame(maxWidth: .infinity)
             }
         }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: StudioMetrics.cardCorner))
+        .controlSize(.large)
     }
 
     private var metadata: some View {
