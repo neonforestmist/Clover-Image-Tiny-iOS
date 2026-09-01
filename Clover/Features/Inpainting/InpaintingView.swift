@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 import UIKit
 
 struct InpaintingView: View {
@@ -9,6 +10,7 @@ struct InpaintingView: View {
     @Binding var settings: GenerationSettings
 
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var fileImporterPresented = false
     @State private var sourceImage: CGImage?
     @State private var baseMask: CGImage?
     @State private var strokes: [MaskStroke] = []
@@ -92,6 +94,19 @@ struct InpaintingView: View {
                         presentedSheet = nil
                         applySourceImage(croppedImage)
                     }
+                }
+            }
+            .fileImporter(
+                isPresented: $fileImporterPresented,
+                allowedContentTypes: [.image]
+            ) { result in
+                switch result {
+                case let .success(url):
+                    Task {
+                        await loadSelectedFile(url)
+                    }
+                case let .failure(error):
+                    errorMessage = error.localizedDescription
                 }
             }
             .task {
@@ -194,12 +209,20 @@ struct InpaintingView: View {
     }
 
     private var initialPhotoPicker: some View {
-        PhotosPicker(
-            selection: $selectedPhoto,
-            matching: .images,
-            photoLibrary: .shared()
-        ) {
-            Label("Choose Image", systemImage: "photo.on.rectangle")
+        Group {
+            if ProcessInfo.processInfo.isiOSAppOnMac {
+                Button("Choose Image", systemImage: "photo.on.rectangle") {
+                    fileImporterPresented = true
+                }
+            } else {
+                PhotosPicker(
+                    selection: $selectedPhoto,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Label("Choose Image", systemImage: "photo.on.rectangle")
+                }
+            }
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
@@ -208,13 +231,21 @@ struct InpaintingView: View {
     }
 
     private var replacePhotoPicker: some View {
-        PhotosPicker(
-            selection: $selectedPhoto,
-            matching: .images,
-            photoLibrary: .shared()
-        ) {
-            Label("Replace Image", systemImage: "photo.on.rectangle")
-                .frame(maxWidth: .infinity)
+        Group {
+            if ProcessInfo.processInfo.isiOSAppOnMac {
+                Button("Replace Image", systemImage: "photo.on.rectangle") {
+                    fileImporterPresented = true
+                }
+            } else {
+                PhotosPicker(
+                    selection: $selectedPhoto,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Label("Replace Image", systemImage: "photo.on.rectangle")
+                        .frame(maxWidth: .infinity)
+                }
+            }
         }
         .buttonStyle(.bordered)
         .disabled(isWorking)
@@ -450,6 +481,35 @@ struct InpaintingView: View {
             } else {
                 presentedSheet = .crop(InpaintingCropSource(image: image))
             }
+        }
+    }
+
+    private func loadSelectedFile(_ url: URL) async {
+        do {
+            let data = try await Task.detached(priority: .userInitiated) {
+                let accessing = url.startAccessingSecurityScopedResource()
+                defer {
+                    if accessing {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+                return try Data(contentsOf: url, options: .mappedIfSafe)
+            }.value
+
+            guard let image = UIImage(data: data)?.cloverNormalized,
+                  let cgImage = image.cgImage else {
+                errorMessage = "The selected image couldn’t be opened."
+                return
+            }
+
+            if cgImage.width == 512, cgImage.height == 512 {
+                applySourceImage(cgImage)
+            } else {
+                presentedSheet = .crop(InpaintingCropSource(image: image))
+            }
+        } catch {
+            errorMessage = "The selected image couldn’t be imported. "
+                + error.localizedDescription
         }
     }
 
