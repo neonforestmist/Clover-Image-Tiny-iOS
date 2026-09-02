@@ -14,7 +14,7 @@ struct LibraryView: View {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return library.artworks }
         return library.artworks.filter {
-            $0.generation.prompt.localizedCaseInsensitiveContains(trimmed)
+            $0.generation.prompt.localizedStandardContains(trimmed)
         }
     }
 
@@ -64,7 +64,7 @@ struct LibraryView: View {
         }
         .environment(library)
         .navigationTitle("Library")
-        .searchable(text: $query, prompt: "Search prompts")
+        .librarySearch(text: $query)
         .navigationDestination(for: UUID.self) { id in
             if let artwork = library.artworks.first(where: { $0.id == id }) {
                 ArtworkDetailView(artwork: artwork, library: library)
@@ -85,6 +85,37 @@ struct LibraryView: View {
             var settings = GenerationSettings()
             settings.adopt(artwork.generation)
             route.openCreate(with: settings)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func librarySearch(text: Binding<String>) -> some View {
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            safeAreaInset(edge: .top, spacing: 0) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+
+                    TextField("Search prompts", text: text)
+                        .textFieldStyle(.plain)
+                        .accessibilityIdentifier("library-search-field")
+
+                    if !text.wrappedValue.isEmpty {
+                        Button("Clear search", systemImage: "xmark.circle.fill") {
+                            text.wrappedValue = ""
+                        }
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.bar)
+            }
+        } else {
+            searchable(text: text, prompt: "Search prompts")
         }
     }
 }
