@@ -123,7 +123,8 @@ open Clover.xcodeproj
 | Each bundled LoRA | 6.9 MB | Optional Create styles |
 
 The Inpainting add-on requires Clover because it reuses Clover's tokenizer,
-text encoder, and VAE decoder. Create LoRAs are not loaded by Inpainting.
+text encoder, and VAE decoder. The current Inpainting screen does not load
+Create LoRAs dynamically.
 
 ## Run the app
 
@@ -225,10 +226,14 @@ recommended and 50 is the on-device maximum. The bundle is converted
 for the SD 1.4-class 512×512 architecture on iOS 18; validate final latency
 and memory on a physical device rather than Simulator.
 
-Create LoRAs are not applied during Inpainting. They target Clover's regular
-four-channel U-Net, while Inpainting uses the separate stateless nine-channel
-checkpoint. An inpainting-specific LoRA must be fused before Core ML
-conversion to be compatible with this pipeline.
+Create LoRAs are not applied by the currently shipped Inpainting screen because
+it uses the separate stateless nine-channel checkpoint. The published styles
+modify attention projections only, so their tensor shapes are compatible with
+the inpainting U-Net; however, they were trained for text-to-image and their
+masked-edit quality must be evaluated separately. A dynamic Core ML deployment
+requires an adapter-aware stateful nine-channel export and matching schema.
+Otherwise, fuse a compatible LoRA before Core ML conversion. A LoRA that
+modifies the four-channel input convolution is not compatible.
 
 ### Verified on iPhone
 

@@ -597,8 +597,8 @@ final class CoreMLInpaintingService: @unchecked Sendable {
         configuration.computeUnits = inpaintingComputeUnits(for: settings.computeTarget)
         let pipeline = try CloverPipelineFactory.makeInpainting(
             resourcesURL: resourcesURL,
-            // Create LoRAs target a different U-Net and must not be applied to
-            // the standalone inpainting checkpoint.
+            // The shipping inpainting bundle is stateless, so it cannot accept
+            // the otherwise shape-compatible attention-only Create LoRAs.
             styleWeights: [],
             configuration: configuration
         )
